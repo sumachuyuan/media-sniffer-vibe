@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_appName__",
+  "version": "1.35.8",
+  "description": "__MSG_appDesc__",
+  "default_locale": "zh_CN",
+  "permissions": [
+    "webRequest",
+    "declarativeNetRequest",
+    "storage",
+    "clipboardWrite",
+    "downloads",
+    "offscreen"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.bilibili.com/*",
+        "*://*.douyin.com/*",
+        "*://*.tiktok.com/*",
+        "*://*.feishu.cn/*",
+        "*://*.larksuite.com/*"
+      ],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "js/background/main.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "preview.html",
+        "preview.js",
+        "hls.min.js",
+        "dash.all.min.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

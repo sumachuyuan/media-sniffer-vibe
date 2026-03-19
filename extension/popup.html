@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --gold-primary: #ffd700;
+      --gold-dark: #c5a059;
+      --bg-deep: #050505;
+      --bg-card: rgba(255, 255, 255, 0.03);
+      --border-thin: rgba(255, 215, 0, 0.15);
+      --text-main: #f0f0f0;
+      --text-muted: #999;
+      --accent-glow: rgba(255, 215, 0, 0.05);
+    }
+
+    body {
+      width: 440px;
+      margin: 0;
+      padding: 0;
+      background: var(--bg-deep);
+      color: var(--text-main);
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: -0.01em;
+      overflow: hidden;
+    }
+
+    .header {
+      background: rgba(10, 10, 10, 0.8);
+      backdrop-filter: blur(20px);
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border-thin);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .title {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--gold-primary);
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .title::before {
+      content: 'V';
+      background: linear-gradient(135deg, var(--gold-primary), var(--gold-dark));
+      color: black;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      font-size: 13px;
+      box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
+      font-weight: 900;
+    }
+
+    .container {
+      padding: 20px;
+      max-height: 480px;
+      overflow-y: auto;
+      scrollbar-gutter: stable;
+    }
+
+    .url-item {
+      background: var(--bg-card);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 16px;
+      margin-bottom: 16px;
+      border-radius: 12px;
+      font-size: 12px;
+      position: relative;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+
+    .url-item:hover {
+      border-color: rgba(255, 215, 0, 0.4);
+      background: rgba(255, 255, 255, 0.06);
+      transform: translateY(-3px) scale(1.01);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.5), 0 0 20px var(--accent-glow);
+    }
+
+    button {
+      background: linear-gradient(135deg, var(--gold-dark), #9a7b41);
+      color: black;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+
+    button:hover {
+      background: var(--gold-primary);
+      box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: scale(0.96);
+      filter: brightness(1.2);
+    }
+
+    .clear-btn {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-muted);
+      padding: 7px 14px;
+      font-weight: 600;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 10px;
+      letter-spacing: 1px;
+    }
+
+    .clear-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Search Bar Overlay */
+    .search-container {
+      padding: 16px 20px;
+      background: var(--bg-deep);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .search-bar {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: var(--gold-primary);
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      outline: none;
+      box-sizing: border-box;
+      transition: all 0.3s ease;
+    }
+
+    .search-bar:focus {
+      border-color: var(--gold-dark);
+      background: rgba(255, 255, 255, 0.05);
+      box-shadow: 0 0 15px rgba(197, 160, 89, 0.1);
+    }
+
+    .search-bar::placeholder {
+      color: #555;
+    }
+
+    /* Toast System */
+    #toastContainer {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: var(--gold-primary);
+      color: #000;
+      padding: 10px 24px;
+      border-radius: 40px;
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: 0 15px 45px rgba(255, 215, 0, 0.2);
+      animation: toastIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      border: 1px solid rgba(0,0,0,0.1);
+    }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(40px) scale(0.8); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-weight: 300;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* Scrollbar Customization */
+    .container::-webkit-scrollbar {
+      width: 4px;
+    }
+    .container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .container::-webkit-scrollbar-thumb {
+      background: rgba(255, 215, 0, 0.1);
+      border-radius: 10px;
+    }
+    /* Inline Preview Player */
+    .inline-preview {
+      display: none;
+      position: relative;
+      width: 100%;
+      background: #000;
+      margin-top: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--gold-dark);
+      overflow: hidden;
+      animation: expandDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes expandDown {
+      from { max-height: 0; opacity: 0; }
+      to { max-height: 300px; opacity: 1; }
+    }
+
+    .inline-preview video {
+      width: 100%;
+      height: 200px;
+      display: block;
+    }
+
+    .preview-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(0,0,0,0.7);
+      color: var(--gold-primary);
+      border: 1px solid var(--gold-dark);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: 800;
+      font-size: 10px;
+      z-index: 10;
+    }
+
+    .preview-close:hover {
+      background: var(--gold-primary);
+      color: black;
+    }
+
+    /* Progress Bar */
+    .progress-container {
+      display: none;
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 2px;
+      margin-top: 14px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--gold-dark), var(--gold-primary));
+      box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+      transition: width 0.4s ease;
+      animation: breathing-glow 1.6s ease-in-out infinite;
+    }
+
+    @keyframes breathing-glow {
+      0%, 100% { box-shadow: 0 0 6px rgba(255, 215, 0, 0.4); }
+      50% { box-shadow: 0 0 16px rgba(255, 215, 0, 0.9); }
+    }
+
+    .progress-text {
+      font-size: 9px;
+      color: var(--gold-primary);
+      margin-top: 5px;
+      font-weight: 800;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      letter-spacing: 0.5px;
+    }
+
+    .progress-text .progress-pct {
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    /* Modular Components */
+    .item-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .protocol-tag { color: #000; padding: 2px 4px; border-radius: 3px; font-size: 9px; font-weight: 900; }
+    .item-title { font-size: 12px; font-weight: 600; color: #eee; flex:1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge-video { background: rgba(0, 170, 255, 0.1); color: #00aaff; padding: 1px 4px; border-radius: 3px; font-size: 8px; margin-left: 6px; }
+    .badge-audio { background: rgba(255, 0, 255, 0.1); color: #ff00ff; padding: 1px 4px; border-radius: 3px; font-size: 8px; margin-left: 6px; }
+    .encrypted-tag { color: #f44; font-size: 8px; font-weight: 800; margin-left: auto; }
+    .item-meta { color: #666; font-size: 9px; margin-bottom: 6px; }
+    .quality-list { margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .quality-tag { background: #111; color: var(--gold-primary); border: 1px solid #333; padding: 2px 5px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s; }
+    .quality-tag:hover { background: var(--gold-primary); color: #000; }
+    .actions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .task-lock { color: #666; font-size: 10px; font-style: italic; padding: 4px; }
+
+    .platform-promo { border: 1px dashed var(--gold-dark); background: rgba(255, 215, 0, 0.02) !important; padding: 16px; margin-bottom: 20px; border-radius: 12px; }
+    .promo-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .promo-label { color: var(--gold-primary); font-weight: 800; font-size: 14px; letter-spacing: 1px; }
+    .promo-desc { color: #aaa; font-size: 11px; margin-bottom: 14px; line-height: 1.5; }
+
+    .companion-card { border: 1px solid var(--gold-primary); background: rgba(255, 215, 0, 0.05) !important; }
+    .companion-header { font-size: 11px; color: var(--gold-primary); font-weight: 800; margin-bottom: 8px; }
+    .companion-actions { display: flex; gap: 8px; }
+    .companion-status { font-size: 8px; color: var(--gold-primary); margin-top: 4px; text-transform: uppercase; }
+
+    .gold-btn { width: 100%; height: 36px; background: var(--gold-primary); color: #000; font-weight: 800; border-radius: 8px; border: none; cursor: pointer; }
+    .outline-btn { flex: 1; background: transparent; color: var(--gold-primary); border: 1px solid var(--gold-primary); font-size: 10px; height: 32px; border-radius: 8px; cursor: pointer; }
+    .cancel-btn { width: 100%; height: 24px; background: #f44; color: #fff; font-size: 8px; font-weight: 800; margin-top: 8px; border-radius: 4px; border: none; cursor: pointer; }
+
+    .progress-box { margin-top: 10px; display: none; }
+    .progress-track { height: 3px; background: rgba(255,255,255,0.05); border-radius: 2px; overflow: hidden; }
+    .progress-text { font-size: 9px; color: #888; margin-top: 4px; display: flex; justify-content: space-between; }
+
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title" data-i18n="appName">Sovereign Sniffer</div>
+    <div style="display: flex; gap: 8px;">
+        <button class="clear-btn" id="perfToggle" title="High Performance Mode" style="width: 32px; padding: 0; color: #888;">🚀</button>
+        <button class="clear-btn" id="langToggle" style="width: 32px; padding: 0;">🌐</button>
+        <button class="clear-btn" id="clearBtn" data-i18n="clearBtn">Clear</button>
+    </div>
+  </div>
+  
+  <div id="global-merge-banner" style="display:none; background: linear-gradient(90deg, #111, #222); border-bottom: 1px solid var(--gold-dark); padding: 12px 20px; animation: slideDown 0.4s ease; position: relative; overflow: hidden;">
+    <div style="display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 2;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span id="global-spinner" style="font-size: 14px; animation: spin 2s linear infinite;">⚙️</span>
+        <div style="display: flex; flex-direction: column;">
+          <span id="global-stage" data-i18n="mergingInProgress" style="color: var(--gold-primary); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">MERGING IN PROGRESS</span>
+          <span id="global-msg" data-i18n="sovereignSandbox" style="color: #888; font-size: 9px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;">Sovereign Sandbox is active...</span>
+        </div>
+      </div>
+      <div id="global-pct" style="color: var(--gold-primary); font-size: 16px; font-weight: 900; font-family: monospace;">0%</div>
+      <button id="global-cancel-btn" class="clear-btn" style="background: rgba(244, 67, 54, 0.1); color: #f44336; border-color: rgba(244, 67, 54, 0.2); padding: 4px 8px; font-size: 9px; margin-left: 10px;">✕</button>
+    </div>
+    <div id="global-bar-bg" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; background: rgba(255, 215, 0, 0.05);">
+        <div id="global-bar" style="width: 0%; height: 100%; background: var(--gold-primary); box-shadow: 0 0 10px var(--gold-primary); transition: width 0.4s ease;"></div>
+    </div>
+  </div>
+
+  <div class="search-container">
+    <input type="search" id="searchBar" class="search-bar" placeholder="Search by title or URL..." data-i18n="searchPlaceholder">
+  </div>
+  <div class="container" id="urlList">
+    <div class="empty-state" data-i18n="noMedia">No streams detected yet. Start playing a video!</div>
+  </div>
+  <div class="footer" style="padding: 12px 20px; border-top: 1px solid rgba(255, 255, 255, 0.03); display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2);">
+    <div style="font-size: 10px; color: #555; font-weight: 500;" data-i18n="footerNote">CMD: CLI command for yt-dlp/ffmpeg</div>
+    <div style="font-size: 9px; color: #444; font-weight: 800; letter-spacing: 1px;">V1.35.8</div>
+  </div>
+  <div id="toastContainer"></div>
+  <script src="hls.min.js"></script>
+  <script src="dash.all.min.js"></script>
+  <script type="module" src="js/popup/main.js"></script>
+</body>
+</html>

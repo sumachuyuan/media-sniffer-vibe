@@ -1,0 +1,124 @@
+{
+  "appName": {
+    "message": "Media Sniffer Vibe"
+  },
+  "platformPageUrl": {
+    "message": "当前页面"
+  },
+  "targeting": {
+    "message": "正在切换至 $RES$P...",
+    "placeholders": {
+      "res": {
+        "content": "$1"
+      }
+    }
+  },
+  "mergeError": {
+    "message": "合并错误: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "appDesc": {
+    "message": "主权媒体捕获引擎"
+  },
+  "clearBtn": {
+    "message": "清空列表"
+  },
+  "searchPlaceholder": {
+    "message": "搜索标题或 URL..."
+  },
+  "noMedia": {
+    "message": "尚未检测到媒体。请开始播放视频！"
+  },
+  "scanning": {
+    "message": "扫描中"
+  },
+  "initializing": {
+    "message": "初始化中"
+  },
+  "fetching": {
+    "message": "抓取中"
+  },
+  "merging": {
+    "message": "合并中"
+  },
+  "complete": {
+    "message": "完成"
+  },
+  "error": {
+    "message": "错误"
+  },
+  "cancelMerge": {
+    "message": "取消合并"
+  },
+  "video": {
+    "message": "视频"
+  },
+  "audio": {
+    "message": "音频"
+  },
+  "encrypted": {
+    "message": "已加密"
+  },
+  "taskLock": {
+    "message": "另一个任务正在进行中..."
+  },
+  "copyCmd": {
+    "message": "CMD"
+  },
+  "nativeMerge": {
+    "message": "合并下载"
+  },
+  "directDownload": {
+    "message": "直链下载"
+  },
+  "play": {
+    "message": "播放"
+  },
+  "close": {
+    "message": "关闭"
+  },
+  "url": {
+    "message": "URL"
+  },
+  "companionHeader": {
+    "message": "💎 检测到音视频配对流"
+  },
+  "promoDesc": {
+    "message": "对于分段流，建议使用原始页面 URL。"
+  },
+  "toastCommandCopied": {
+    "message": "命令已复制！"
+  },
+  "toastUrlCopied": {
+    "message": "URL 已复制！"
+  },
+  "toastListCleared": {
+    "message": "列表已清空"
+  },
+  "toastDownloadStarted": {
+    "message": "开始下载..."
+  },
+  "toastMergeComplete": {
+    "message": "合并完成！"
+  },
+  "toastScanFailed": { "message": "扫描失败" },
+  "copyCmdTooltip": { "message": "复制 yt-dlp/ffmpeg 终端命令" },
+  "copyUrlTooltip": { "message": "复制媒体直链" },
+  "footerNote": { "message": "CMD: 适用于 yt-dlp/ffmpeg 的终端命令指令" },
+  "captured": { "message": "捕获时间" },
+  "universal": { "message": "通用下载" },
+  "mergingInProgress": { "message": "合并进行中" },
+  "sovereignSandbox": { "message": "主权沙箱运行中..." },
+  "targetPage": { "message": "目标页面" },
+  "sizeWarning": { "message": "检测到大文件 (~$SIZE$)。浏览器合并可能不稳定，建议使用 CMD 模式。", "placeholders": { "size": { "content": "$1" } } },
+  "sizeCritical": { "message": "高负载视频 (~$SIZE$)。浏览器合并极易崩溃，强烈建议使用 CMD 模式。", "placeholders": { "size": { "content": "$1" } } },
+  "confirmNativeMerge": { "message": "该视频体积较大 (~$SIZE$)，浏览器原生合并可能会失败或导致浏览器卡死。\n\n仍然继续吗？（建议取消并使用 CMD 命令）", "placeholders": { "size": { "content": "$1" } } },
+  "toastHighPerfOn": { "message": "🚀 高能模式：多线程快速抓取已开启" },
+  "toastHighPerfOff": { "message": "🛡️ 安全模式：单线程稳定执行" },
+  "perfToggleTooltip": { "message": "性能切换 (🚀 多线程极速 / 🛡️ 单线程稳定)" },
+  "langToggleTooltip": { "message": "切换语言 (🌐 中文 / English)" }
+}

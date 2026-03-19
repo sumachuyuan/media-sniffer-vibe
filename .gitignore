@@ -1,0 +1,18 @@
+# 1. 默认屏蔽根目录下所有文件和文件夹
+/*
+
+# 2. 【核心白名单】只允许这 5 个关键组件进入 GitHub
+!extension/
+!README.md
+!LICENSE
+!PRIVACY_POLICY.md
+!.gitignore
+
+# 3. 内部例外：确保插件内部的代码不会受根目录屏蔽影响
+!extension/**
+
+# 4. 常规操作系统垃圾屏蔽（辅助）
+.DS_Store
+.DS_Store?
+._*
+Thumds.db
