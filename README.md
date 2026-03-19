@@ -1,52 +1,6 @@
 # Media Sniffer Vibe (v1.35.8)
 
-[English](#english) | [简体中文](#chinese)
-
-<a name="english"></a>
-## English
-
-> **Positioning**: A "Sovereign" browser-native media capture engine based on FFmpeg.wasm.
-> **Core Philosophy**: Offline-first, Privacy-first, Tool Integration.
-
----
-
-### 🚀 1. Installation Guide
-
-1.  **Get the Code**: Download and extract the project package `media-sniffer-vibe-v1.35.8.zip`.
-2.  **Open Extensions Page**: Enter `chrome://extensions/` in the Chrome address bar.
-3.  **Enable Developer Mode**: Check "Developer mode" in the top right corner.
-4.  **Load Extension**: Click "Load unpacked" and select the **root folder** (where `manifest.json` is located).
-5.  **Pin Extension**: Click the puzzle icon and pin **Media Sniffer Vibe** to the toolbar.
-
----
-
-### 🛠️ 2. Key Features
-
--   **Native Merge**: Leverage `FFmpeg.wasm` to merge HLS/DASH/fMP4 segments directly in the browser—**zero latency, no server required**.
--   **High Performance**: 🚀 button enables 3-5 concurrent threads for 300%+ faster downloads.
--   **Memory Sovereignty**: Proactive `MEMFS` cleanup ensures system resources are released immediately after tasks.
--   **Sovereign Sniffing**: Automatically identifies M3U8, MPD, MP4, and various audio streams.
--   **Privacy Dehydration**: Audited permission logic ensuring zero data collection.
--   **Multilingual**: Support for English and Chinese with one-click toggling.
-
----
-
-### 📖 3. User Guide
-
-#### Step 1: Discover Media
-Open a webpage with video/audio and start playback. The toolbar icon will display the count of detected streams.
-
-#### Step 2: Choose Capture Method
-Click the icon to open the popup and see the resource list:
-
-1.  **MERGE & DOWNLOAD**:
-    *   **Best for**: M3U8/DASH streams.
-    *   **Action**: Click the button and watch the progress bar. The MP4 will download automatically once finished.
-2.  **CMD**:
-    *   **Best for**: YouTube/Bilibili or scenarios requiring high-quality external processing.
-    *   **Action**: Copy the `yt-dlp` command to your clipboard.
-
----
+[简体中文](#chinese) | [English](#english)
 
 <a name="chinese"></a>
 ## 简体中文
@@ -58,10 +12,12 @@ Click the icon to open the popup and see the resource list:
 
 ### 🚀 1. 安装指南
 
-1.  **获取代码**: 下载并解压项目压缩包 `media-sniffer-vibe-v1.35.8.zip`。
+1.  **获取代码**: 
+    *   **方法 A**: 克隆此仓库：`git clone https://github.com/sumachuyuan/media-sniffer-vibe.git`
+    *   **方法 B**: 从 [GitHub Releases](https://github.com/sumachuyuan/media-sniffer-vibe/releases) 下载并解压源代码。
 2.  **打开扩展页面**: 在 Chrome 浏览器地址栏输入 `chrome://extensions/`。
 3.  **开启开发者模式**: 勾选页面右上角的“开发者模式 (Developer mode)”。
-4.  **加载插件**: 点击左上角的“加载已解压的扩展程序 (Load unpacked)”，选择解压后的**根文件夹**（`manifest.json` 就在根目录下）。
+4.  **加载插件**: 点击左上角的“加载已解压的扩展程序 (Load unpacked)”，选择项目中的 **extension 文件夹**。
 5.  **固定插件**: 点击浏览器工具栏的拼图图标，将 **Media Sniffer Vibe** 固定到工具栏。
 
 ---
@@ -91,6 +47,54 @@ Click the icon to open the popup and see the resource list:
 2.  **CMD 指令 (CMD)**:
     *   **适用场景**: YouTube、Bilibili 或需要外部处理的场景。
     *   **操作**: 点击将 `yt-dlp` 指令复制到剪贴板。
+
+---
+
+<a name="english"></a>
+## English
+
+> **Positioning**: A "Sovereign" browser-native media capture engine based on FFmpeg.wasm.
+> **Core Philosophy**: Offline-first, Privacy-first, Tool Integration.
+
+---
+
+### 🚀 1. Installation Guide
+
+1.  **Get the Code**: 
+    *   **Option A**: Clone this repository: `git clone https://github.com/sumachuyuan/media-sniffer-vibe.git`
+    *   **Option B**: Download and extract the source code from [GitHub Releases](https://github.com/sumachuyuan/media-sniffer-vibe/releases).
+2.  **Open Extensions Page**: Enter `chrome://extensions/` in the Chrome address bar.
+3.  **Enable Developer Mode**: Check "Developer mode" in the top right corner.
+4.  **Load Extension**: Click "Load unpacked" and select the **extension folder** within this project.
+5.  **Pin Extension**: Click the puzzle icon and pin **Media Sniffer Vibe** to the toolbar.
+
+---
+
+### 🛠️ 2. Key Features
+
+-   **Native Merge**: Leverage `FFmpeg.wasm` to merge HLS/DASH/fMP4 segments directly in the browser—**zero latency, no server required**.
+-   **High Performance**: 🚀 button enables 3-5 concurrent threads for 300%+ faster downloads.
+-   **Memory Sovereignty**: Proactive `MEMFS` cleanup ensures system resources are released immediately after tasks.
+-   **Sovereign Sniffing**: Automatically identifies M3U8, MPD, MP4, and various audio streams.
+-   **Privacy Dehydration**: Audited permission logic ensuring zero data collection.
+-   **Multilingual**: Support for English and Chinese with one-click toggling.
+
+---
+
+### 📖 3. User Guide
+
+#### Step 1: Discover Media
+Open a webpage with video/audio and start playback. The toolbar icon will display the count of detected streams.
+
+#### Step 2: Choose Capture Method
+Click the icon to open the popup and see the resource list:
+
+1.  **MERGE & DOWNLOAD**:
+    *   **Best for**: M3U8/DASH streams.
+    *   **Action**: Click the button and watch the progress bar. The MP4 will download automatically once finished.
+2.  **CMD**:
+    *   **Best for**: YouTube/Bilibili or scenarios requiring high-quality external processing.
+    *   **Action**: Copy the `yt-dlp` command to your clipboard.
 
 ---
 
