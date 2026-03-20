@@ -45,8 +45,31 @@
     *   **适用场景**: M3U8 视频流等。
     *   **操作**: 点击按钮，观察进度条。完成后，浏览器会自动弹出 MP4 下载。
 2.  **CMD 指令 (CMD)**:
-    *   **适用场景**: YouTube、Bilibili 或需要外部处理的场景。
+    *   **适用场景**: YouTube、Bilibili 或需要外部处理（如 4K/8K）的场景。
     *   **操作**: 点击将 `yt-dlp` 指令复制到剪贴板。
+
+---
+
+### 🔧 4. 高级进阶：外部工具指南
+
+为了使用 **CMD** 模式进行高质量下载，您需要在电脑上安装 `yt-dlp` 和 `ffmpeg`。
+
+#### A: 安装 yt-dlp
+`yt-dlp` 是目前最强大的命令行音视频下载工具。
+*   **macOS**: `brew install yt-dlp` (需安装 [Homebrew](https://brew.sh/))
+*   **Windows**: 从 [yt-dlp GitHub Releases](https://github.com/yt-dlp/yt-dlp/releases) 下载 `yt-dlp.exe`，并将其放置在系统的 PATH 环境变量目录下。
+*   **Linux**: `sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp`
+
+#### B: 安装 FFmpeg
+`ffmpeg` 是音视频合并的必备核心引擎。
+*   **macOS**: `brew install ffmpeg`
+*   **Windows**: 从 [ffmpeg.org](https://ffmpeg.org/download.html) 或 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 下载构建包，解压并将 `bin` 目录添加到 PATH。
+*   **Linux**: `sudo apt install ffmpeg`
+
+#### C: 使用方法
+1. 从插件中点击 **CMD** 按钮复制指令。
+2. 打开终端（Terminal）或命令行（CMD/PowerShell）。
+3. 粘贴并回车，工具将自动完成下载与合并。
 
 ---
 
@@ -93,8 +116,29 @@ Click the icon to open the popup and see the resource list:
     *   **Best for**: M3U8/DASH streams.
     *   **Action**: Click the button and watch the progress bar. The MP4 will download automatically once finished.
 2.  **CMD**:
-    *   **Best for**: YouTube/Bilibili or scenarios requiring high-quality external processing.
+    *   **Best for**: YouTube/Bilibili or scenarios requiring high-quality external processing (e.g., 4K/8K).
     *   **Action**: Copy the `yt-dlp` command to your clipboard.
+
+---
+
+### 🔧 4. Advanced: External Tooling Guide
+
+To use the **CMD** mode for high-quality downloads, you need to install `yt-dlp` and `ffmpeg` on your computer.
+
+#### A: Install yt-dlp
+*   **macOS**: `brew install yt-dlp`
+*   **Windows**: Download `yt-dlp.exe` from [GitHub Releases](https://github.com/yt-dlp/yt-dlp/releases).
+*   **Linux**: `sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp`
+
+#### B: Install FFmpeg
+*   **macOS**: `brew install ffmpeg`
+*   **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html).
+*   **Linux**: `sudo apt install ffmpeg`
+
+#### C: Usage
+1. Click the **CMD** button in the extension to copy the command.
+2. Open your Terminal or CMD/PowerShell.
+3. Paste and press Enter. The tool will automatically download and merge the media.
 
 ---
 
