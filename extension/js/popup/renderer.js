@@ -16,10 +16,14 @@ export function createUrlItem(item, tab, state) {
     const urlLower = item.url.toLowerCase();
 
     let protocol = 'EXT', protocolColor = '#444';
-    const isDirectMP4 = urlLower.includes('.mp4') || urlLower.includes('douyinvod.com') || urlLower.includes('/video/tos/') || urlLower.includes('tiktokv.com');
+    const isDirectFile = urlLower.includes('.mp4') || urlLower.includes('.mp3') || urlLower.includes('.m4a') || urlLower.includes('.wav') || urlLower.includes('.aac') || urlLower.includes('douyinvod.com') || urlLower.includes('/video/tos/') || urlLower.includes('tiktokv.com');
     
     if (urlLower.includes('.m3u8')) protocol = 'M3U8', protocolColor = 'var(--gold-primary)';
-    else if (isDirectMP4) protocol = 'MP4', protocolColor = '#00aaff';
+    else if (isDirectFile) {
+        if (urlLower.includes('.mp3')) protocol = 'MP3', protocolColor = '#ff44aa';
+        else if (urlLower.includes('.m4a') || urlLower.includes('.wav') || urlLower.includes('.aac')) protocol = 'AUDIO', protocolColor = '#8855ff';
+        else protocol = 'MP4', protocolColor = '#00aaff';
+    }
     else if (urlLower.includes('.mpd')) protocol = 'MPD', protocolColor = '#ff5500';
 
     let typeBadge = '';
@@ -58,7 +62,7 @@ export function createUrlItem(item, tab, state) {
                     ${t('nativeMerge')}
                 </button>
             ` : ''}
-            ${(protocol === 'MP4') ? `<button class="direct-download" data-url="${item.url}" data-filename="${filename}">${t('directDownload')}</button>` : ''}
+            ${(isDirectFile) ? `<button class="direct-download" data-url="${item.url}" data-filename="${filename}">${t('directDownload')}</button>` : ''}
             <button class="play-btn" data-url="${item.url}" data-id="${item.id}">${t('play')}</button>
             <button class="copy-btn" data-url="${item.url}" title="${t('copyUrlTooltip')}">${t('url')}</button>
         `;

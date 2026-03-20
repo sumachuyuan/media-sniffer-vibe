@@ -108,7 +108,7 @@ export function isValidMediaMime(mimeType, url = '') {
   // Special case: octet-stream for actual media files (media extension or known API path)
   if (mimeLower.includes('application/octet-stream')) {
     const urlLower = url.toLowerCase();
-    const mediaExts = ['.m3u8', '.mpd', '.mp4', '.ts', '.m4s', '.m4a', '.webm'];
+    const mediaExts = ['.m3u8', '.mpd', '.mp4', '.ts', '.m4s', '.m4a', '.webm', '.mp3', '.wav', '.aac', '.flac'];
     if (mediaExts.some(ext => urlLower.includes(ext))) return true;
     // Feishu/Lark video API paths (no media extension in URL)
     const feishuPaths = [
