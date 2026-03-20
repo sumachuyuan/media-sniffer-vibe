@@ -109,7 +109,9 @@ export function renderPromo(platformName, currentTab, ua) {
         <button id="copyMajorBtn" class="gold-btn" title="${t('copyCmdTooltip')}">${t('copyCmd')}</button>
     `;
     div.querySelector('#copyMajorBtn').onclick = () => {
-        const cmd = `yt-dlp --cookies-from-browser chrome --referer "${currentTab.url}" --user-agent "${ua}" --impersonate chrome --concurrent-fragments 5 --no-mtime --merge-output-format mp4 -o "${sanitizeFilename(currentTab.title)}.%(ext)s" "${currentTab.url}"`;
+        const isYT = currentTab.url.includes('youtube.com') || currentTab.url.includes('googlevideo.com');
+        const remoteFlag = isYT ? ' --remote-components ejs:github' : '';
+        const cmd = `yt-dlp${remoteFlag} --cookies-from-browser chrome --referer "${currentTab.url}" --user-agent "${ua}" --impersonate chrome --concurrent-fragments 5 --no-mtime --merge-output-format mp4 -o "${sanitizeFilename(currentTab.title)}.%(ext)s" "${currentTab.url}"`;
         navigator.clipboard.writeText(cmd).then(() => ui.showToast(t('toastCommandCopied')));
     };
     return div;
