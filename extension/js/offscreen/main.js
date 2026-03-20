@@ -88,29 +88,36 @@ async function handleMergeSegments(m) {
 
     logger.info(`Starting fetch of ${total} segments with concurrency=${concurrency}...`);
     
-    // Pool-based fetching
-    const results = new Array(total);
-    let completed = 0;
-    const pool = async (index) => {
-        if (isCancelled || index >= total) return;
-        try {
-            const resp = await fetch(segments[index]);
-            if (!resp.ok) throw new Error(`Segment ${index} fetch failed: ${resp.status}`);
-            let buf = new Uint8Array(await resp.arrayBuffer());
-            if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
-            ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
-            buf = null; // Memory hygiene
-            completed++;
-            if (completed % 20 === 0 || completed === total) {
-                sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
+    // Shared index pool for fetching
+    let currentIndex = 0;
+    const pool = async () => {
+        while (!isCancelled && currentIndex < total) {
+            const index = currentIndex++;
+            try {
+                const url = segments[index];
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`Segment ${index} fetch failed: ${resp.status}`);
+                
+                let buf = new Uint8Array(await resp.arrayBuffer());
+                if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
+                
+                ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
+                buf = null; // Explicit memory hygiene
+                
+                completed++;
+                if (completed % 20 === 0 || completed === total) {
+                    sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
+                }
+            } catch (e) {
+                isCancelled = true; // Signal other threads to stop
+                throw e;
             }
-            await pool(index + concurrency);
-        } catch (e) { throw e; }
+        }
     };
 
-    const initialThreads = Math.min(concurrency, total);
+    const threadCount = Math.min(concurrency, total);
     const threads = [];
-    for (let i = 0; i < initialThreads; i++) threads.push(pool(i));
+    for (let i = 0; i < threadCount; i++) threads.push(pool());
     await Promise.all(threads);
 
     if (isCancelled) throw new Error('CANCELLED');
