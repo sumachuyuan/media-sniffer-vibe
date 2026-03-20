@@ -176,7 +176,12 @@ function bindEvents(tab) {
         };
     });
     document.querySelectorAll('.copy-cli').forEach(btn => {
-        btn.onclick = () => copyToClipboard(`yt-dlp --referer "${tab.url}" --user-agent "${state.ua}" -o "${btn.dataset.filename}.%(ext)s" "${btn.dataset.url}"`, () => ui.showToast(t('toastCommandCopied')));
+        btn.onclick = () => {
+            const url = btn.dataset.url;
+            const isYT = url.includes('googlevideo.com') || url.includes('youtube.com');
+            const remoteFlag = isYT ? ' --remote-components ejs:github' : '';
+            copyToClipboard(`yt-dlp${remoteFlag} --referer "${tab.url}" --user-agent "${state.ua}" -o "${btn.dataset.filename}.%(ext)s" "${url}"`, () => ui.showToast(t('toastCommandCopied')));
+        };
     });
     document.querySelectorAll('.copy-btn').forEach(btn => btn.onclick = () => copyToClipboard(btn.dataset.url, () => ui.showToast(t('toastUrlCopied'))));
     document.querySelectorAll('.direct-download').forEach(btn => {
