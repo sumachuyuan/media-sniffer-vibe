@@ -22,7 +22,7 @@
   "nativeMerge": { "message": "MERGE & DOWNLOAD" },
   "directDownload": { "message": "DIRECT" },
   "play": { "message": "PLAY" },
-  "close": { "message": "CLOSE" },
+  "close": { "message": "✕" },
   "url": { "message": "URL" },
   "companionHeader": { "message": "💎 COMPANION STREAMS DETECTED" },
   "promoDesc": { "message": "Using the original page URL is recommended for fragmented streams." },

@@ -79,7 +79,7 @@
     "message": "播放"
   },
   "close": {
-    "message": "关闭"
+    "message": "✕"
   },
   "url": {
     "message": "URL"

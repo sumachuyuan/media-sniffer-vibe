@@ -238,7 +238,7 @@ function startEmbeddedPreview(url, uid) {
     container.style.display = 'block';
     container.innerHTML = `
         <div class="preview-header" style="display:flex; justify-content:flex-end; padding:4px;">
-            <div class="preview-close" style="cursor:pointer; color:var(--gold-primary); font-size:10px; font-weight:800;">[${t('close')}]</div>
+            <div class="preview-close" style="cursor:pointer; color:var(--gold-primary); font-size:10px; font-weight:800;">${t('close')}</div>
         </div>
         <video controls autoplay class="preview-video" style="width:100%; max-height:240px; background:#000;"></video>
     `;
