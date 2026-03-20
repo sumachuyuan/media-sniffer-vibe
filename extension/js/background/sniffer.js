@@ -40,7 +40,7 @@ export function isNoiseFragment(url) {
 
   const fragmentSigns = [
     'seg-', 'fragment-', 'part-', '/ts/', '.ts', '.m4f', 'chunk-',
-    'range=', 'bytes=', 'index=', '/sq/', '/shub/'
+    'range=', 'bytes=', 'index=', '/sq/', '/shub/', 'webmask'
   ];
 
   if (urlLower.includes('googlevideo.com') || urlLower.includes('bilivideo.com')) {
