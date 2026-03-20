@@ -1,4 +1,4 @@
-# Media Sniffer Vibe (v1.35.8)
+# Media Sniffer Vibe
 
 [简体中文](#chinese) | [English](#english)
 

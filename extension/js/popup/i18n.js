@@ -71,5 +71,11 @@ export const i18n = {
         
         // Update document lang for accessibility
         document.documentElement.lang = result.preferredLanguage || chrome.i18n.getUILanguage();
+
+        // 3. Update dynamic version tags
+        const version = chrome.runtime.getManifest().version;
+        document.querySelectorAll('[data-version]').forEach(el => {
+            el.textContent = `V${version}`;
+        });
     }
 };
