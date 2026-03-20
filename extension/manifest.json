@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_appName__",
-  "version": "1.35.14",
+  "version": "1.35.12",
   "description": "__MSG_appDesc__",
   "default_locale": "zh_CN",
   "permissions": [
@@ -25,7 +25,9 @@
         "*://*.feishu.cn/*",
         "*://*.larksuite.com/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "all_frames": true,
       "run_at": "document_idle"
     }
@@ -58,7 +60,9 @@
         "hls.min.js",
         "dash.all.min.js"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
