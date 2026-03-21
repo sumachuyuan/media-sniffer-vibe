@@ -94,19 +94,20 @@ async function handleMergeSegments(m) {
     const failedSegments = [];
     let completed = 0;
 
+    const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+    const MAX_ATTEMPTS = 3;
+
     const fetchAndProcess = async (index, workerId) => {
-        const RETRYABLE = new Set([429, 500, 502, 503, 504]);
-        const MAX_ATTEMPTS = 3;
         try {
             const url = segments[index];
             let resp, attempt = 0;
             while (true) {
                 resp = await fetch(url);
                 if (resp.ok) break;
-                if (!RETRYABLE.has(resp.status) || ++attempt >= MAX_ATTEMPTS) {
+                if (!RETRYABLE_STATUSES.has(resp.status) || ++attempt >= MAX_ATTEMPTS) {
                     throw new Error(`Status ${resp.status}`);
                 }
-                const delay = 500 * Math.pow(2, attempt - 1); // 500ms, 1000ms
+                const delay = 500 * Math.pow(2, attempt - 1); // Exponential backoff: 500ms, 1000ms...
                 logger.warn(`Worker ${workerId} segment ${index} got ${resp.status}, retrying in ${delay}ms (attempt ${attempt}/${MAX_ATTEMPTS - 1})`);
                 await sleep(delay);
             }
