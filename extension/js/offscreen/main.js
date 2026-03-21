@@ -97,6 +97,13 @@ async function handleMergeSegments(m) {
     const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
     const MAX_ATTEMPTS = 3;
 
+    const CHAOS_MODE = false; // 压力测试开关：开启后随机注入故障
+    const CHAOS_CONFIG = {
+        requestFail: 0.1,    // 10% 概率模拟 HTTP 502
+        networkError: 0.05,  // 5% 概率模拟 Failed to fetch (TypeError)
+        bodyTruncate: 0.1    // 10% 概率模拟传输中断 (Mismatch)
+    };
+
     const fetchAndProcess = async (index, workerId) => {
         try {
             const url = segments[index];
@@ -104,12 +111,24 @@ async function handleMergeSegments(m) {
             while (true) {
                 let errorMsg = '';
                 try {
-                    resp = await fetch(url);
+                    // --- 混沌工程测试：模拟随机故障注入 ---
+                    if (CHAOS_MODE && Math.random() < CHAOS_CONFIG.requestFail) {
+                        throw new Error(`Simulated Chaos: Status 502`);
+                    }
+                    if (CHAOS_MODE && Math.random() < CHAOS_CONFIG.networkError) {
+                        throw new TypeError(`Simulated Chaos: Failed to fetch`);
+                    }
+
+                    const resp = await fetch(url);
                     if (!resp.ok) {
                         errorMsg = `Status ${resp.status}`;
                         if (!RETRYABLE_STATUSES.has(resp.status)) throw new Error(errorMsg);
                     } else {
-                        // Move body download inside the loop to catch ERR_CONTENT_LENGTH_MISMATCH
+                        // --- 混沌工程测试：模拟下载中途断连 ---
+                        if (CHAOS_MODE && Math.random() < CHAOS_CONFIG.bodyTruncate) {
+                            throw new Error(`Simulated Chaos: net::ERR_CONTENT_LENGTH_MISMATCH`);
+                        }
+                        // 下载分片本体
                         buf = new Uint8Array(await resp.arrayBuffer());
                         break;
                     }
