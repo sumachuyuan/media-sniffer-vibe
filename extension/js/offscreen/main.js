@@ -116,8 +116,10 @@ async function handleMergeSegments(m) {
     };
 
     const pool = async (workerId) => {
-        while (!isCancelled && currentIndex < total) {
-            await fetchAndProcess(currentIndex++, workerId);
+        while (!isCancelled) {
+            const index = currentIndex++;
+            if (index >= total) break;
+            await fetchAndProcess(index, workerId);
         }
     };
 
