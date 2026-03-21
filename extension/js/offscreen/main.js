@@ -90,37 +90,61 @@ async function handleMergeSegments(m) {
     
     // Shared index pool for fetching
     let currentIndex = 0;
-    const pool = async () => {
-        while (!isCancelled && currentIndex < total) {
-            const index = currentIndex++;
-            try {
-                const url = segments[index];
-                const resp = await fetch(url);
-                if (!resp.ok) throw new Error(`Segment ${index} fetch failed: ${resp.status}`);
-                
-                let buf = new Uint8Array(await resp.arrayBuffer());
-                if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
-                
-                ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
-                buf = null; // Explicit memory hygiene
-                
-                completed++;
-                if (completed % 20 === 0 || completed === total) {
-                    sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
-                }
-            } catch (e) {
-                isCancelled = true; // Signal other threads to stop
-                throw e;
+    const failedSegments = [];
+    let completed = 0;
+
+    const fetchAndProcess = async (index, workerId) => {
+        try {
+            const url = segments[index];
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`Status ${resp.status}`);
+            
+            let buf = new Uint8Array(await resp.arrayBuffer());
+            if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
+            
+            ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
+            buf = null; // Memory hygiene
+            
+            completed++;
+            if (completed % 20 === 0 || completed === total) {
+                sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
             }
+        } catch (e) {
+            logger.warn(`Worker ${workerId} failed segment ${index}: ${e.message}`);
+            failedSegments.push(index);
+        }
+    };
+
+    const pool = async (workerId) => {
+        while (!isCancelled && currentIndex < total) {
+            await fetchAndProcess(currentIndex++, workerId);
         }
     };
 
     const threadCount = Math.min(concurrency, total);
+    logger.info(`Starting initial fetch pool with ${threadCount} workers...`);
     const threads = [];
-    for (let i = 0; i < threadCount; i++) threads.push(pool());
+    for (let i = 0; i < threadCount; i++) threads.push(pool(i));
     await Promise.all(threads);
 
+    // --- Retry Pass ---
+    if (!isCancelled && failedSegments.length > 0) {
+        logger.info(`Attempting to retry ${failedSegments.length} failed segments...`);
+        const toRetry = [...failedSegments];
+        failedSegments.length = 0; // Clear for retry tracking
+        
+        // Single-threaded retry for maximum stability
+        for (const index of toRetry) {
+            if (isCancelled) break;
+            await fetchAndProcess(index, 'retry-agent');
+        }
+    }
+
     if (isCancelled) throw new Error('CANCELLED');
+    if (failedSegments.length > 0) {
+        throw new Error(`Critical failure: ${failedSegments.length} segments could not be fetched after retries.`);
+    }
+
     logger.info('All segments fetched and written to FS');
 
     let concatList = mapUrl ? "file 'init.mp4'\n" : "";
