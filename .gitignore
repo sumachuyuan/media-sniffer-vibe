@@ -8,7 +8,6 @@
 !PRIVACY_POLICY.md
 !.gitignore
 !.github/
-!docs/
 
 # 3. 内部例外：确保插件内部的代码不会受根目录屏蔽影响
 !extension/**
