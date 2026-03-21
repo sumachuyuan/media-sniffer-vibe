@@ -5,11 +5,11 @@ import { logger } from '../common/logger.js';
 import { state, cleanTab, resetGlobalMergeStatus } from './storage.js';
 import { 
   MEDIA_SIGNATURES, NOISE_KEYWORDS, isNoiseFragment, 
-  extractGroupTag, detectMediaType, isValidMediaMime
+  extractGroupTag, detectMediaType, isValidMediaMime, isVerifiedMedia
 } from './sniffer.js';
 import { parseM3U8, parseMPD, parseHlsSegments, parseDashSegments } from './parser.js';
 import {
-  handleFfmpegMerge,
+  handleFfmpegMerge, handleProxyDownload,
   handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch
 } from './orchestrator.js';
 
@@ -29,6 +29,10 @@ async function addMedia(tabId, url, title, qualities = null, encryption = null, 
     if (!existing.qualities && qualities) { existing.qualities = qualities; updated = true; }
     if (!existing.encryption && encryption) { existing.encryption = encryption; updated = true; }
     if (!existing.isSegmented && isSegmented) { existing.isSegmented = isSegmented; updated = true; }
+    if (estimatedSize > 0 && (!existing.estimatedSize || existing.estimatedSize === 0)) {
+      existing.estimatedSize = estimatedSize;
+      updated = true;
+    }
     return;
   }
 
@@ -123,9 +127,14 @@ chrome.webRequest.onResponseStarted.addListener(
     if (isNoiseFragment(url)) return;
 
     if (isValidMediaMime(contentType, url)) {
-      // Logic: If it's a direct stream (not a manifest), ignore if < 100KB to prevent UI noise
-      const isManifest = url.includes('.m3u8') || url.includes('.mpd') || contentType.includes('mpegurl') || contentType.includes('dash+xml');
-      if (!isManifest && contentLength > 0 && contentLength < 102400) return;
+      const urlLower = url.toLowerCase();
+      // Exemption: Manifests and verified media paths/params (like TikTok video streams) skip the size check.
+      const isManifest = urlLower.includes('.m3u8') || urlLower.includes('.mpd') || contentType.includes('mpegurl') || contentType.includes('dash+xml');
+      const isVerified = isVerifiedMedia(urlLower);
+      
+      // Logic: If it's a direct stream (not a manifest/verified stream), ignore if < 1MB (1048576 bytes) 
+      // This is a universal way to filter out JSON/Telemetry blobs that might use octet-stream.
+      if (!isManifest && !isVerified && contentLength > 0 && contentLength < 1048576) return;
 
       state.processingUrls.add(url);
       chrome.tabs.get(tabId, (tab) => {
@@ -194,10 +203,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (type === 'START_DIRECT_DOWNLOAD') {
+    const isSensitive = request.url.includes('tiktok.com') || request.url.includes('douyinvod.com') || request.url.includes('bilibili.com');
     updateDnrRulesForFetch(request.referer, request.ua, request.url).then(() => {
-        chrome.downloads.download({ url: request.url, filename: `${request.filename}.mp4`, saveAs: true }, () => {
-            setTimeout(clearDnrRules, 5000);
-        });
+        if (isSensitive) {
+            handleProxyDownload({ ...request, outputName: request.filename });
+        } else {
+            chrome.downloads.download({ url: request.url, filename: `${request.filename}.mp4`, saveAs: true }, () => {
+                setTimeout(clearDnrRules, 5000);
+            });
+        }
+        sendResponse({ status: 'started' });
     });
     return true;
   }

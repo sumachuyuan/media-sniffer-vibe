@@ -135,10 +135,11 @@ function renderUrls() {
 
             const sorted = displayUrls.reverse();
 
-            // Pairing
+            // Pairing - Skip only for TikTok (Unified streams take priority)
+            const skipPairing = hostname.includes('tiktok');
             const videoUrls = sorted.filter(u => u.mediaType === 'video');
             const audioUrls = sorted.filter(u => u.mediaType === 'audio');
-            if (videoUrls.length > 0 && audioUrls.length > 0 && !state.mergingUrl) {
+            if (videoUrls.length > 0 && audioUrls.length > 0 && !state.mergingUrl && !skipPairing) {
                 const v = videoUrls[0], a = audioUrls.find(au => au.groupTag === v.groupTag) || audioUrls[0];
                 list.appendChild(renderCompanion(v, a, currentTab, state, (v, a) => {
                     state.mergingUrl = v.url;
@@ -293,8 +294,12 @@ function handleRuntimeMessages(m) {
             if (pct) pct.textContent = `${Math.round(m.progress)}%`;
         }
     } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
-        if (m.type === 'FFMPEG_COMPLETE') ui.showToast(t('toastMergeComplete'));
-        else ui.showToast(t('mergeError', [m.error]), 'error');
+        const isProxy = m.isProxy;
+        if (m.type === 'FFMPEG_COMPLETE') {
+            ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
+        } else {
+            ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
+        }
         resetUI();
         setTimeout(renderUrls, 2500);
     }

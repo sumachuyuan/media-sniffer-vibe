@@ -5,9 +5,19 @@ import { logger } from '../common/logger.js';
 
 export const MEDIA_SIGNATURES = [
   '.m3u8', '.mpd', '.mp4', '.webm', 'googlevideo.com', 'videoplayback',
-  'chunklist', 'mime=video', 'mime=audio', 'douyinvod.com', 'tiktokv.com',
+  'chunklist', 'mime=video', 'mime=audio', 'mime_type=video', 'mime_type=audio',
   '/video/tos/', '/music/', '.m4a'
 ];
+
+/**
+ * Identify high-confidence media streams (ByteDance/TikTok etc.)
+ * These should bypass normal noise filters like the 1MB threshold.
+ */
+export function isVerifiedMedia(url) {
+  if (!url) return false;
+  const u = url.toLowerCase();
+  return u.includes('/video/tos/') || u.includes('mime_type=video');
+}
 
 export const VALID_MEDIA_MIMES = [
   'video/', 

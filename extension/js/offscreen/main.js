@@ -195,9 +195,50 @@ async function handleMergeSegments(m) {
   }
 }
 
+// --- Single File Proxy Download ---
+async function handleProxyDownload(m) {
+  if (isMerging) return;
+  isMerging = true; isCancelled = false;
+  const { url, outputName, itemId } = m;
+  
+  try {
+    sendProgress(5, url, t('fetching'), itemId);
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    
+    const contentLength = +resp.headers.get('Content-Length');
+    const reader = resp.body.getReader();
+    let receivedLength = 0;
+    let chunks = [];
+    
+    while(true) {
+      if (isCancelled) throw new Error('CANCELLED');
+      const {done, value} = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      receivedLength += value.length;
+      if (contentLength && receivedLength % (1024 * 1024) === 0) { // Update every 1MB
+        sendProgress(Math.round((receivedLength / contentLength) * 95), url, t('fetching'), itemId);
+      }
+    }
+    
+    const blob = new Blob(chunks, { type: resp.headers.get('Content-Type') || 'video/mp4' });
+    const blobUrl = URL.createObjectURL(blob);
+    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url, itemId, isProxy: true });
+  } catch (e) {
+    if (e.message !== 'CANCELLED') {
+      console.error('Proxy Download Error', e);
+      chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url, itemId, isProxy: true });
+    }
+  } finally {
+    isMerging = false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'FFMPEG_MERGE') handleMerge(m);
   if (m.type === 'FFMPEG_MERGE_SEGMENTS') handleMergeSegments(m);
+  if (m.type === 'START_PROXY_DOWNLOAD') handleProxyDownload(m);
   if (m.type === 'CANCEL_FFMPEG_MERGE') isCancelled = true;
 });
 

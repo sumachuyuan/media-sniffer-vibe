@@ -59,13 +59,32 @@ export async function handleFfmpegMerge(data) {
   try {
     const hasDoc = await chrome.offscreen.hasDocument();
     if (!hasDoc) {
-      pendingMergeRequest = data;
+      pendingMergeRequest = { ...data, _type: 'MERGE' };
       await createOffscreen();
     } else {
       sendMergeCommandToOffscreen(data);
     }
   } catch (e) {
     logger.error('FFmpeg merge handling failed', e);
+  }
+}
+
+export async function handleProxyDownload(data) {
+  try {
+    const hasDoc = await chrome.offscreen.hasDocument();
+    if (!hasDoc) {
+      pendingMergeRequest = { ...data, _type: 'PROXY' };
+      await createOffscreen();
+    } else {
+      chrome.runtime.sendMessage({ 
+        type: 'START_PROXY_DOWNLOAD', 
+        url: data.url, 
+        outputName: data.outputName, 
+        itemId: data.itemId 
+      }).catch(err => logger.error('Proxy Command failed', err));
+    }
+  } catch (e) {
+    logger.error('Proxy download handling failed', e);
   }
 }
 
@@ -100,7 +119,16 @@ export function sendMergeCommandToOffscreen(data) {
 
 export function handleOffscreenReady() {
   if (pendingMergeRequest) {
-    sendMergeCommandToOffscreen(pendingMergeRequest);
+    if (pendingMergeRequest._type === 'PROXY') {
+      chrome.runtime.sendMessage({ 
+        type: 'START_PROXY_DOWNLOAD', 
+        url: pendingMergeRequest.url, 
+        outputName: pendingMergeRequest.outputName, 
+        itemId: pendingMergeRequest.itemId 
+      }).catch(() => {});
+    } else {
+      sendMergeCommandToOffscreen(pendingMergeRequest);
+    }
     pendingMergeRequest = null;
   }
 }

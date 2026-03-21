@@ -30,7 +30,12 @@
   "toastUrlCopied": { "message": "URL Copied!" },
   "toastListCleared": { "message": "List cleared" },
   "toastDownloadStarted": { "message": "Starting Download..." },
-  "toastMergeComplete": { "message": "Merge Complete!" },
+  "toastMergeComplete": {
+    "message": "Merge Complete!"
+  },
+  "toastDownloadComplete": {
+    "message": "Download Complete!"
+  },
   "toastScanFailed": { "message": "Scan failed" },
   "copyCmdTooltip": { "message": "Copy CLI command for yt-dlp/ffmpeg" },
   "copyUrlTooltip": { "message": "Copy media URL to clipboard" },

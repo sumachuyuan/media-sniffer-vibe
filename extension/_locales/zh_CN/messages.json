@@ -105,6 +105,9 @@
   "toastMergeComplete": {
     "message": "合并完成！"
   },
+  "toastDownloadComplete": {
+    "message": "下载完成！"
+  },
   "toastScanFailed": { "message": "扫描失败" },
   "copyCmdTooltip": { "message": "复制 yt-dlp/ffmpeg 终端命令" },
   "copyUrlTooltip": { "message": "复制媒体直链" },
