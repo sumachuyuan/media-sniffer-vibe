@@ -9,6 +9,7 @@ let isMerging = false;
 let isCancelled = false;
 
 const t = (key) => (typeof chrome !== 'undefined' && chrome.i18n) ? chrome.i18n.getMessage(key) || key : key;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function sendProgress(progress, url, stage = t('fetching'), itemId = null) {
     chrome.runtime.sendMessage({ type: 'FFMPEG_PROGRESS', progress, url, stage, itemId }).catch(() => {});
@@ -131,7 +132,8 @@ async function handleMergeSegments(m) {
 
     // --- Retry Pass ---
     if (!isCancelled && failedSegments.length > 0) {
-        logger.info(`Attempting to retry ${failedSegments.length} failed segments...`);
+        logger.info(`Detected ${failedSegments.length} transient failures. Cooling off for 1s before retry...`);
+        await sleep(1000); // Server recovery window
         const toRetry = [...failedSegments];
         failedSegments.length = 0; // Clear for retry tracking
         
