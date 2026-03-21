@@ -100,14 +100,19 @@ async function handleMergeSegments(m) {
     const fetchAndProcess = async (index, workerId) => {
         try {
             const url = segments[index];
-            let resp, attempt = 0;
+            let buf, attempt = 0;
             while (true) {
                 let errorMsg = '';
                 try {
                     resp = await fetch(url);
-                    if (resp.ok) break;
-                    errorMsg = `Status ${resp.status}`;
-                    if (!RETRYABLE_STATUSES.has(resp.status)) throw new Error(errorMsg);
+                    if (!resp.ok) {
+                        errorMsg = `Status ${resp.status}`;
+                        if (!RETRYABLE_STATUSES.has(resp.status)) throw new Error(errorMsg);
+                    } else {
+                        // Move body download inside the loop to catch ERR_CONTENT_LENGTH_MISMATCH
+                        buf = new Uint8Array(await resp.arrayBuffer());
+                        break;
+                    }
                 } catch (e) {
                     errorMsg = e.message;
                 }
@@ -118,8 +123,6 @@ async function handleMergeSegments(m) {
                 logger.warn(`Worker ${workerId} segment ${index} got ${errorMsg}, retrying in ${delay}ms (attempt ${attempt}/${MAX_ATTEMPTS - 1})`);
                 await sleep(delay);
             }
-
-            let buf = new Uint8Array(await resp.arrayBuffer());
             if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
 
             ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
