@@ -12,7 +12,7 @@ const t = (key) => (typeof chrome !== 'undefined' && chrome.i18n) ? chrome.i18n.
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function sendProgress(progress, url, stage = t('fetching'), itemId = null) {
-    chrome.runtime.sendMessage({ type: 'FFMPEG_PROGRESS', progress, url, stage, itemId }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'FFMPEG_PROGRESS', progress, url, stage, itemId }).catch(() => { });
 }
 
 // --- Companion Stream Merge ---
@@ -25,10 +25,10 @@ async function handleMerge(m) {
 
   try {
     const fetchAsset = async (url) => {
-        if (isCancelled) throw new Error('CANCELLED');
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return await r.blob();
+      if (isCancelled) throw new Error('CANCELLED');
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.blob();
     };
 
     logger.info(`Fetching assets: video=${videoUrl}, audio=${audioUrl}`);
@@ -48,11 +48,11 @@ async function handleMerge(m) {
     if (isCancelled) throw new Error('CANCELLED');
     const outData = ffmpeg.FS('readFile', 'final.mp4');
     const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
-    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url: progressUrl, itemId }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url: progressUrl, itemId }).catch(() => { });
   } catch (e) {
     if (e.message !== 'CANCELLED') {
-        logger.error('Merge FATAL Error', e);
-        chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url: progressUrl, itemId }).catch(() => {});
+      logger.error('Merge FATAL Error', e);
+      chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url: progressUrl, itemId }).catch(() => { });
     }
   } finally {
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
@@ -77,18 +77,18 @@ async function handleMergeSegments(m) {
     cleanupFS(ffmpeg);
 
     if (encryption?.method === 'AES-128' && encryption.uri) {
-        const r = await fetch(encryption.uri);
-        aesKey = await r.arrayBuffer();
+      const r = await fetch(encryption.uri);
+      aesKey = await r.arrayBuffer();
     }
 
     if (mapUrl) {
-        logger.info(`Fetching initialization map: ${mapUrl}`);
-        const r = await fetch(mapUrl);
-        ffmpeg.FS('writeFile', 'init.mp4', new Uint8Array(await r.arrayBuffer()));
+      logger.info(`Fetching initialization map: ${mapUrl}`);
+      const r = await fetch(mapUrl);
+      ffmpeg.FS('writeFile', 'init.mp4', new Uint8Array(await r.arrayBuffer()));
     }
 
     logger.info(`Starting fetch of ${total} segments with concurrency=${concurrency}...`);
-    
+
     // Shared index pool for fetching
     let currentIndex = 0;
     const failedSegments = [];
@@ -97,72 +97,53 @@ async function handleMergeSegments(m) {
     const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
     const MAX_ATTEMPTS = 3;
 
-    const CHAOS_MODE = false; // 压力测试开关：开启后随机注入故障
-    const CHAOS_CONFIG = {
-        requestFail: 0.1,    // 10% 概率模拟 HTTP 502
-        networkError: 0.05,  // 5% 概率模拟 Failed to fetch (TypeError)
-        bodyTruncate: 0.1    // 10% 概率模拟传输中断 (Mismatch)
-    };
-
     const fetchAndProcess = async (index, workerId) => {
-        try {
-            const url = segments[index];
-            let buf, attempt = 0;
-            while (true) {
-                let errorMsg = '';
-                try {
-                    // --- 混沌工程测试：模拟随机故障注入 ---
-                    if (CHAOS_MODE && Math.random() < CHAOS_CONFIG.requestFail) {
-                        throw new Error(`Simulated Chaos: Status 502`);
-                    }
-                    if (CHAOS_MODE && Math.random() < CHAOS_CONFIG.networkError) {
-                        throw new TypeError(`Simulated Chaos: Failed to fetch`);
-                    }
-
-                    const resp = await fetch(url);
-                    if (!resp.ok) {
-                        errorMsg = `Status ${resp.status}`;
-                        if (!RETRYABLE_STATUSES.has(resp.status)) throw new Error(errorMsg);
-                    } else {
-                        // --- 混沌工程测试：模拟下载中途断连 ---
-                        if (CHAOS_MODE && Math.random() < CHAOS_CONFIG.bodyTruncate) {
-                            throw new Error(`Simulated Chaos: net::ERR_CONTENT_LENGTH_MISMATCH`);
-                        }
-                        // 下载分片本体
-                        buf = new Uint8Array(await resp.arrayBuffer());
-                        break;
-                    }
-                } catch (e) {
-                    errorMsg = e.message;
-                }
-
-                if (++attempt >= MAX_ATTEMPTS) throw new Error(errorMsg || 'Max attempts reached');
-
-                const delay = 500 * Math.pow(2, attempt - 1); // Exponential backoff: 500ms, 1000ms...
-                logger.warn(`Worker ${workerId} segment ${index} got ${errorMsg}, retrying in ${delay}ms (attempt ${attempt}/${MAX_ATTEMPTS - 1})`);
-                await sleep(delay);
+      try {
+        const url = segments[index];
+        let buf, attempt = 0;
+        while (true) {
+          let errorMsg = '';
+          try {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+              errorMsg = `Status ${resp.status}`;
+              if (!RETRYABLE_STATUSES.has(resp.status)) throw new Error(errorMsg);
+            } else {
+              // 下载分片本体
+              buf = new Uint8Array(await resp.arrayBuffer());
+              break;
             }
-            if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
+          } catch (e) {
+            errorMsg = e.message;
+          }
 
-            ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
-            buf = null; // Memory hygiene
+          if (++attempt >= MAX_ATTEMPTS) throw new Error(errorMsg || 'Max attempts reached');
 
-            completed++;
-            if (completed % 20 === 0 || completed === total) {
-                sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
-            }
-        } catch (e) {
-            logger.warn(`Worker ${workerId} failed segment ${index}: ${e.message}`);
-            failedSegments.push(index);
+          const delay = 500 * Math.pow(2, attempt - 1); // Exponential backoff: 500ms, 1000ms...
+          logger.warn(`Worker ${workerId} segment ${index} got ${errorMsg}, retrying in ${delay}ms (attempt ${attempt}/${MAX_ATTEMPTS - 1})`);
+          await sleep(delay);
         }
+        if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
+
+        ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
+        buf = null; // Memory hygiene
+
+        completed++;
+        if (completed % 20 === 0 || completed === total) {
+          sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
+        }
+      } catch (e) {
+        logger.warn(`Worker ${workerId} failed segment ${index}: ${e.message}`);
+        failedSegments.push(index);
+      }
     };
 
     const pool = async (workerId) => {
-        while (!isCancelled) {
-            const index = currentIndex++;
-            if (index >= total) break;
-            await fetchAndProcess(index, workerId);
-        }
+      while (!isCancelled) {
+        const index = currentIndex++;
+        if (index >= total) break;
+        await fetchAndProcess(index, workerId);
+      }
     };
 
     const threadCount = Math.min(concurrency, total);
@@ -173,21 +154,21 @@ async function handleMergeSegments(m) {
 
     // --- Retry Pass ---
     if (!isCancelled && failedSegments.length > 0) {
-        logger.info(`Detected ${failedSegments.length} transient failures. Cooling off for 1s before retry...`);
-        await sleep(1000); // Server recovery window
-        const toRetry = [...failedSegments];
-        failedSegments.length = 0; // Clear for retry tracking
-        
-        // Single-threaded retry for maximum stability
-        for (const index of toRetry) {
-            if (isCancelled) break;
-            await fetchAndProcess(index, 'retry-agent');
-        }
+      logger.info(`Detected ${failedSegments.length} transient failures. Cooling off for 1s before retry...`);
+      await sleep(1000); // Server recovery window
+      const toRetry = [...failedSegments];
+      failedSegments.length = 0; // Clear for retry tracking
+
+      // Single-threaded retry for maximum stability
+      for (const index of toRetry) {
+        if (isCancelled) break;
+        await fetchAndProcess(index, 'retry-agent');
+      }
     }
 
     if (isCancelled) throw new Error('CANCELLED');
     if (failedSegments.length > 0) {
-        throw new Error(`Critical failure: ${failedSegments.length} segments could not be fetched after retries.`);
+      throw new Error(`Critical failure: ${failedSegments.length} segments could not be fetched after retries.`);
     }
 
     logger.info('All segments fetched and written to FS');
@@ -202,11 +183,11 @@ async function handleMergeSegments(m) {
     if (isCancelled) throw new Error('CANCELLED');
     const outData = ffmpeg.FS('readFile', 'final.mp4');
     const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
-    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url: progressUrl, itemId }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url: progressUrl, itemId }).catch(() => { });
   } catch (e) {
     if (e.message !== 'CANCELLED') {
-        logger.error('Segment Merge FATAL Error', e);
-        chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url: progressUrl, itemId }).catch(() => {});
+      logger.error('Segment Merge FATAL Error', e);
+      chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url: progressUrl, itemId }).catch(() => { });
     }
   } finally {
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
@@ -220,4 +201,4 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'CANCEL_FFMPEG_MERGE') isCancelled = true;
 });
 
-chrome.runtime.sendMessage({ type: 'FFMPEG_READY' }).catch(() => {});
+chrome.runtime.sendMessage({ type: 'FFMPEG_READY' }).catch(() => { });
