@@ -19,38 +19,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get Version from Manifest
-        id: get_version
+      - name: Create Git Tag (If Missing)
+        id: create_tag
         run: |
           VERSION=$(grep '"version":' extension/manifest.json | sed -E 's/.*"version": "([^"]+)".*/\1/')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Check if Tag Exists
-        id: check_tag
-        run: |
-          if git rev-parse "v${{ env.VERSION }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Tag v${{ env.VERSION }} already exists. Skipping."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
+          TAG="v$VERSION"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
           fi
-
-      - name: Create Git Tag
-        if: steps.check_tag.outputs.exists == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "v${{ env.VERSION }}"
-          git push origin "v${{ env.VERSION }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Create Release Zip
-        if: steps.check_tag.outputs.exists == 'false'
         run: |
           zip -r media-sniffer-vibe-v${{ env.VERSION }}.zip extension/ README.md LICENSE PRIVACY_POLICY.md
 
-      - name: Create GitHub Release
-        if: steps.check_tag.outputs.exists == 'false'
+      - name: Sync GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
