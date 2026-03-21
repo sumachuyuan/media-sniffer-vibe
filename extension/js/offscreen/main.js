@@ -95,17 +95,28 @@ async function handleMergeSegments(m) {
     let completed = 0;
 
     const fetchAndProcess = async (index, workerId) => {
+        const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+        const MAX_ATTEMPTS = 3;
         try {
             const url = segments[index];
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`Status ${resp.status}`);
-            
+            let resp, attempt = 0;
+            while (true) {
+                resp = await fetch(url);
+                if (resp.ok) break;
+                if (!RETRYABLE.has(resp.status) || ++attempt >= MAX_ATTEMPTS) {
+                    throw new Error(`Status ${resp.status}`);
+                }
+                const delay = 500 * Math.pow(2, attempt - 1); // 500ms, 1000ms
+                logger.warn(`Worker ${workerId} segment ${index} got ${resp.status}, retrying in ${delay}ms (attempt ${attempt}/${MAX_ATTEMPTS - 1})`);
+                await sleep(delay);
+            }
+
             let buf = new Uint8Array(await resp.arrayBuffer());
             if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
-            
+
             ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
             buf = null; // Memory hygiene
-            
+
             completed++;
             if (completed % 20 === 0 || completed === total) {
                 sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
