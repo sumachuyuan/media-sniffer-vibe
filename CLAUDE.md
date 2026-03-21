@@ -62,3 +62,9 @@ Use the shared `common/logger.js` module. It prefixes log messages by component 
 ## No Tests
 
 There are no automated tests. Testing is manual: load the extension, visit target sites (YouTube, Bilibili, Douyin, TikTok, Feishu/Lark), and verify capture and download behavior.
+
+## Git Development Workflow
+
+- **Atomic Local Commits**: Use `git commit` locally to record significant bug fixes or feature completions. Avoid over-committing for every line of code change.
+- **Strict Remote Push**: **NEVER** push to the remote repository (`origin master` or tags) without explicit confirmation from the user. The user retains full control over the remote sync and automated release triggers.
+- **Internal Docs**: Keep all audit reports and internal technical documents in the `docs/` folder, which must stay untracked/ignored by Git.
