@@ -6,7 +6,7 @@ import { logger } from '../common/logger.js';
 export const MEDIA_SIGNATURES = [
   '.m3u8', '.mpd', '.mp4', '.webm', 'googlevideo.com', 'videoplayback',
   'chunklist', 'mime=video', 'mime=audio', 'mime_type=video', 'mime_type=audio',
-  '/video/tos/', '/music/', '.m4a'
+  '/video/tos/', '.m4a'
 ];
 
 /**
@@ -41,7 +41,7 @@ export const NOISE_KEYWORDS = [
   'browser-sync', 'hot-update', 'webpack-dev-server',
   'ykad', 'atm.youku.com', 'cpv.youku.com', 'pre_ad', 'post_ad',
   'adv_', 'ad_url', 'ad_type', 'cupid.iqiyi.com', 'ad.video.qq.com',
-  'vmind.qq.com', 'pgdt.qq.com', 'gdt.qq.com'
+  'vmind.qq.com', 'pgdt.qq.com', 'gdt.qq.com', 'tt_to_dsp', 'platform/list/v1'
 ];
 
 export function isNoiseFragment(url) {
