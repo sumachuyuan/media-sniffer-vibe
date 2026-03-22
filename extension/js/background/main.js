@@ -159,6 +159,16 @@ chrome.tabs.onRemoved.addListener(cleanTab);
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   const { type } = request;
 
+  if (type === 'MEDIA_DETECTED') {
+    const { url, title, isManualExtract } = request;
+    const tabId = sender.tab ? sender.tab.id : -1;
+    const senderUrl = sender.tab ? sender.tab.url : '';
+    if (tabId !== -1 && url && isManualExtract && senderUrl.includes('tiktok.com')) {
+      addMedia(tabId, url, title || (sender.tab ? sender.tab.title : null));
+    }
+    return true;
+  }
+
   if (type === 'GET_URLS') {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       sendResponse({ urls: tabs[0] ? (state.tabStorage.get(tabs[0].id) || []) : [] });

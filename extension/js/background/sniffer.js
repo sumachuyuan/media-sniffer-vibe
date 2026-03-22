@@ -105,6 +105,14 @@ export function detectMediaType(url) {
 export function isValidMediaMime(mimeType, url = '') {
   if (!mimeType) return false;
   const mimeLower = mimeType.toLowerCase();
+  const urlLower = url.toLowerCase();
+
+  // Strict rejection for known image signatures in the URL
+  // This prevents fake octet-streams or weird CDN paths from bypassing length checks
+  const imageSigns = ['.image', '.webp', '.jpg', '.jpeg', '.png', '.gif', '.avif', '~tplv-'];
+  if (imageSigns.some(s => urlLower.includes(s))) {
+    return false;
+  }
   
   if (mimeLower.startsWith('video/') || mimeLower.startsWith('audio/')) return true;
   
