@@ -136,7 +136,7 @@ function renderUrls() {
                 return;
             }
 
-            let displayUrls = response.urls.filter(u => u.tabTitle.toLowerCase().includes(searchTerm) || u.url.toLowerCase().includes(searchTerm));
+            let displayUrls = response.urls.filter(u => u.tabTitle.toLowerCase().includes(searchTerm));
             if (platformName !== t('platformPageUrl') && !searchTerm) {
                 if (platformName === 'YouTube') displayUrls = displayUrls.filter(u => !u.url.includes('googlevideo.com'));
                 else if (platformName === 'Bilibili') displayUrls = displayUrls.filter(u => !u.url.includes('.m4s') && !u.url.includes('.m4f') && !u.url.includes('.webmask'));
@@ -158,7 +158,7 @@ function renderUrls() {
                 }));
             }
 
-            sorted.forEach(item => list.appendChild(createUrlItem(item, currentTab, state)));
+            sorted.forEach(item => list.appendChild(createUrlItem(item, currentTab, state, searchTerm)));
             bindEvents(currentTab);
         });
     });

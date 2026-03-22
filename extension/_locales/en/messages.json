@@ -5,7 +5,7 @@
   "mergeError": { "message": "Merge Error: $ERROR$", "placeholders": { "error": { "content": "$1" } } },
   "appDesc": { "message": "Sovereign Media Capture Engine" },
   "clearBtn": { "message": "CLEAR" },
-  "searchPlaceholder": { "message": "Search by title or URL..." },
+  "searchPlaceholder": { "message": "Search by title..." },
   "noMedia": { "message": "No media detected. Start playing a video!" },
   "scanning": { "message": "SCANNING" },
   "initializing": { "message": "INITIALIZING" },

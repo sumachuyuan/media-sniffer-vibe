@@ -14,6 +14,19 @@ import {
 } from './orchestrator.js';
 
 // --- Helper: Add Media to Storage ---
+function sanitizeTitle(title) {
+  if (!title || title === 'Embedded Media' || title === chrome.i18n.getMessage('targetPage')) return title || chrome.i18n.getMessage('targetPage');
+  const platforms = ['YouTube', 'Bilibili', '哔哩哔哩', '抖音', 'Douyin', 'TikTok', 'Instagram', 'Twitter', 'X', 'Feishu', '飞书'];
+  let cleanTitle = title;
+  const parts = cleanTitle.split(/ - | \| | _ | – /);
+  if (parts.length > 1) {
+    const bestPart = parts.sort((a, b) => b.length - a.length).find(p => !platforms.some(plat => p.toLowerCase().includes(plat.toLowerCase())));
+    if (bestPart) cleanTitle = bestPart.trim();
+    else cleanTitle = parts[0].trim();
+  }
+  return cleanTitle;
+}
+
 async function addMedia(tabId, url, title, qualities = null, encryption = null, isSegmented = false, estimatedSize = 0) {
   if (!state.tabStorage.has(tabId)) state.tabStorage.set(tabId, []);
   let urls = state.tabStorage.get(tabId);
@@ -42,7 +55,7 @@ async function addMedia(tabId, url, title, qualities = null, encryption = null, 
     id: Date.now() + "_" + Math.floor(Math.random() * 1000000),
     url,
     timestamp: Date.now(),
-    tabTitle: title || chrome.i18n.getMessage('targetPage'),
+    tabTitle: sanitizeTitle(title),
     qualities,
     mediaType: detectMediaType(url),
     groupTag: extractGroupTag(url),
@@ -94,8 +107,21 @@ chrome.webRequest.onBeforeRequest.addListener(
         }
       }
 
-      chrome.tabs.get(tabId, (tab) => {
-        if (!chrome.runtime.lastError && tab) addMedia(tabId, url, tab.title, qualities, encryption, isSegmented, estimatedSize);
+      chrome.tabs.sendMessage(tabId, { type: 'GET_PURE_TITLE', url: url }, (response) => {
+        if (chrome.runtime.lastError) {
+          chrome.tabs.get(tabId, (tab) => {
+            if (!chrome.runtime.lastError && tab) addMedia(tabId, url, tab.title, qualities, encryption, isSegmented, estimatedSize);
+          });
+          return;
+        }
+        const title = (response && response.title) ? response.title : null;
+        if (title) {
+          addMedia(tabId, url, title, qualities, encryption, isSegmented, estimatedSize);
+        } else {
+          chrome.tabs.get(tabId, (tab) => {
+            if (!chrome.runtime.lastError && tab) addMedia(tabId, url, tab.title, qualities, encryption, isSegmented, estimatedSize);
+          });
+        }
       });
       state.processingUrls.delete(url);
     }
@@ -137,9 +163,22 @@ chrome.webRequest.onResponseStarted.addListener(
       if (!isManifest && !isVerified && contentLength > 0 && contentLength < 1048576) return;
 
       state.processingUrls.add(url);
-      chrome.tabs.get(tabId, (tab) => {
-        if (!chrome.runtime.lastError && tab) {
-          addMedia(tabId, url, tab.title, null, null, isManifest, contentLength || 0);
+      chrome.tabs.sendMessage(tabId, { type: 'GET_PURE_TITLE', url: url }, (response) => {
+        if (chrome.runtime.lastError) {
+          chrome.tabs.get(tabId, (tab) => {
+            if (!chrome.runtime.lastError && tab) addMedia(tabId, url, tab.title, null, null, isManifest, contentLength || 0);
+          });
+          return;
+        }
+        const title = (response && response.title) ? response.title : null;
+        if (title) {
+          addMedia(tabId, url, title, null, null, isManifest, contentLength || 0);
+        } else {
+          chrome.tabs.get(tabId, (tab) => {
+            if (!chrome.runtime.lastError && tab) {
+              addMedia(tabId, url, tab.title, null, null, isManifest, contentLength || 0);
+            }
+          });
         }
       });
       state.processingUrls.delete(url);

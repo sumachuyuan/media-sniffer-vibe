@@ -316,6 +316,7 @@
     .item-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
     .protocol-tag { color: #000; padding: 2px 4px; border-radius: 3px; font-size: 9px; font-weight: 900; }
     .item-title { font-size: 12px; font-weight: 600; color: #eee; flex:1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .search-highlight { background: var(--gold-primary); color: #000; padding: 0 2px; border-radius: 2px; font-weight: 800; }
     .badge-video { background: rgba(0, 170, 255, 0.1); color: #00aaff; padding: 1px 4px; border-radius: 3px; font-size: 8px; margin-left: 6px; }
     .badge-audio { background: rgba(255, 0, 255, 0.1); color: #ff00ff; padding: 1px 4px; border-radius: 3px; font-size: 8px; margin-left: 6px; }
     .encrypted-tag { color: #f44; font-size: 8px; font-weight: 800; margin-left: auto; }
@@ -374,7 +375,7 @@
   </div>
 
   <div class="search-container">
-    <input type="search" id="searchBar" class="search-bar" placeholder="Search by title or URL..." data-i18n="searchPlaceholder">
+    <input type="search" id="searchBar" class="search-bar" placeholder="Search by title..." data-i18n="searchPlaceholder">
   </div>
   <div class="container" id="urlList">
     <div class="empty-state" data-i18n="noMedia">No streams detected yet. Start playing a video!</div>

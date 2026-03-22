@@ -7,7 +7,7 @@ import { i18n } from './i18n.js';
 
 const t = (key, subs) => i18n.t(key, subs);
 
-export function createUrlItem(item, tab, state) {
+export function createUrlItem(item, tab, state, searchTerm = '') {
     const div = document.createElement('div');
     div.className = 'url-item';
     const displayTitle = (item.tabTitle && item.tabTitle !== 'null') ? item.tabTitle : (tab.title || 'Unknown');
@@ -79,7 +79,7 @@ export function createUrlItem(item, tab, state) {
     div.innerHTML = `
         <div class="item-header">
             <span class="protocol-tag" style="background: ${protocolColor}">${protocol}</span>
-            <span class="item-title">${escapeHtml(displayTitle)}</span>
+            <span class="item-title">${highlightText(displayTitle, searchTerm)}</span>
             ${typeBadge}
             ${item.encryption ? `<span class="encrypted-tag">${t('encrypted')}</span>` : ''}
         </div>
@@ -150,4 +150,14 @@ export function renderCompanion(v, a, currentTab, state, onMerge) {
         navigator.clipboard.writeText(cmd).then(() => ui.showToast(t('toastCommandCopied')));
     };
     return div;
+}
+
+function highlightText(text, searchTerm) {
+    if (!searchTerm) return escapeHtml(text);
+    const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return text.split(regex).map(part => 
+        part.toLowerCase() === searchTerm.toLowerCase() 
+            ? `<mark class="search-highlight">${escapeHtml(part)}</mark>` 
+            : escapeHtml(part)
+    ).join('');
 }
