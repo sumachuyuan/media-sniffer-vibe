@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             await chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_TIKTOK' });
             await new Promise(r => setTimeout(r, 150)); // Give background a moment to process
-        } catch (e) {}
+        } catch (e) { }
     }
 
     // 1. Initial Render & Status Sync
@@ -168,7 +168,7 @@ function bindEvents(tab) {
     document.querySelectorAll('.native-merge').forEach(btn => {
         btn.onclick = () => {
             if (state.mergingUrl) return;
-            
+
             const estimatedSize = parseInt(btn.dataset.estimatedSize || '0');
             if (estimatedSize > 1.5 * 1024 * 1024 * 1024) {
                 const sizeGB = (estimatedSize / (1024 * 1024 * 1024)).toFixed(1) + 'GB';
@@ -238,7 +238,7 @@ function startEmbeddedPreview(url, uid) {
     if (window.activePreviewUid === uid) {
         teardownActiveHls();
         container.style.display = 'none'; container.innerHTML = ''; window.activePreviewUid = null;
-        chrome.runtime.sendMessage({ type: 'CLEAR_DNR_RULES' }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'CLEAR_DNR_RULES' }).catch(() => { });
         return;
     }
 
@@ -261,7 +261,7 @@ function startEmbeddedPreview(url, uid) {
     container.querySelector('.preview-close').onclick = () => {
         teardownActiveHls();
         container.style.display = 'none'; container.innerHTML = ''; window.activePreviewUid = null;
-        chrome.runtime.sendMessage({ type: 'CLEAR_DNR_RULES' }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'CLEAR_DNR_RULES' }).catch(() => { });
     };
 
     const video = container.querySelector('video');
@@ -291,7 +291,7 @@ function handleRuntimeMessages(m) {
         state.mergingProgress = m.progress;
         state.mergingStage = m.stage || '';
         ui.updateMergeBanner(m.progress, m.stage, m.outputName || state.mergingUrl);
-        
+
         if (m.itemId) {
             const bar = document.getElementById(`pb-bar-${m.itemId}`);
             const stage = document.getElementById(`pb-stage-${m.itemId}`);

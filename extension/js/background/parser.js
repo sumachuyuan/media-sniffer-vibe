@@ -174,7 +174,9 @@ export async function parseHlsSegments(playlistUrl) {
         else segments.push(baseUrl + line);
       }
     }
-    return { segments, encryption, mapUrl };
+    const res = { segments, encryption, mapUrl };
+    logger.info(`parseHlsSegments result: ${res.segments.length} segments found. Encrypted: ${!!res.encryption}`);
+    return res;
   } catch (e) {
     logger.error('Failed to parse HLS segments', e);
     return { segments: [], encryption: null, mapUrl: null };
@@ -196,7 +198,9 @@ export async function parseDashSegments(mpdUrl) {
         segments.push(segUrl.startsWith('http') ? segUrl : baseUrl + segUrl);
       }
     }
-    return { segments, encryption: null, mapUrl: null };
+    const res = { segments, encryption: null, mapUrl: null };
+    logger.info(`parseDashSegments result: ${res.segments.length} segments found.`);
+    return res;
   } catch (e) {
     logger.error('Failed to parse DASH segments', e);
     return { segments: [], encryption: null, mapUrl: null };

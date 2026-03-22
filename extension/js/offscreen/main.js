@@ -104,23 +104,26 @@ async function handleMergeSegments(m) {
         while (true) {
           let errorMsg = '';
           try {
-            const resp = await fetch(url);
+            logger.debug(`Worker ${workerId} fetching segment ${index}: ${url}`);
+            const resp = await fetch(url, { credentials: 'include' });
             if (!resp.ok) {
               errorMsg = `Status ${resp.status}`;
+              logger.warn(`Worker ${workerId} segment ${index} failed: ${errorMsg}`);
               if (!RETRYABLE_STATUSES.has(resp.status)) throw new Error(errorMsg);
             } else {
-              // 下载分片本体
               buf = new Uint8Array(await resp.arrayBuffer());
+              logger.debug(`Worker ${workerId} segment ${index} fetched successfully (${buf.length} bytes)`);
               break;
             }
           } catch (e) {
             errorMsg = e.message;
+            logger.warn(`Worker ${workerId} segment ${index} fetch error: ${errorMsg}`);
           }
 
           if (++attempt >= MAX_ATTEMPTS) throw new Error(errorMsg || 'Max attempts reached');
 
-          const delay = 500 * Math.pow(2, attempt - 1); // Exponential backoff: 500ms, 1000ms...
-          logger.warn(`Worker ${workerId} segment ${index} got ${errorMsg}, retrying in ${delay}ms (attempt ${attempt}/${MAX_ATTEMPTS - 1})`);
+          const delay = 500 * Math.pow(2, attempt - 1); 
+          logger.info(`Worker ${workerId} segment ${index} retrying in ${delay}ms...`);
           await sleep(delay);
         }
         if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
@@ -133,7 +136,7 @@ async function handleMergeSegments(m) {
           sendProgress(Math.round((completed / total) * 90), progressUrl, t('fetching'), itemId);
         }
       } catch (e) {
-        logger.warn(`Worker ${workerId} failed segment ${index}: ${e.message}`);
+        logger.error(`Worker ${workerId} segment ${index} FATAL: ${e.message}`);
         failedSegments.push(index);
       }
     };
@@ -173,15 +176,36 @@ async function handleMergeSegments(m) {
 
     logger.info('All segments fetched and written to FS');
 
-    let concatList = mapUrl ? "file 'init.mp4'\n" : "";
-    for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
-    ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
+    let finalArgs;
+    if (mapUrl) {
+      logger.info('Executing binary concat for fMP4 segments...');
+      const parts = [ffmpeg.FS('readFile', 'init.mp4')];
+      for (let i = 0; i < total; i++) {
+        parts.push(ffmpeg.FS('readFile', `part_${i}.ts`));
+        try { ffmpeg.FS('unlink', `part_${i}.ts`); } catch(e){} // Free memory
+      }
+      try { ffmpeg.FS('unlink', 'init.mp4'); } catch(e){}
+
+      const mergedBlob = new Blob(parts);
+      const mergedBuffer = new Uint8Array(await mergedBlob.arrayBuffer());
+      ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
+      
+      finalArgs = ['-y', '-i', 'merged.mp4', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
+    } else {
+      let concatList = "";
+      for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
+      ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
+      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
+    }
 
     sendProgress(95, progressUrl, t('merging'), itemId);
-    await runFFmpeg(ffmpeg, ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-fflags', '+genpts+igndts', '-movflags', '+faststart', 'final.mp4']);
-
+    logger.info(`FFmpeg starting with args: ${finalArgs.join(' ')}`);
+    sendProgress(95, progressUrl, t('merging'), itemId);
+    
+    await ffmpeg.run(...finalArgs);
+    logger.info(`FFmpeg process completed for ${outputName}`);
     if (isCancelled) throw new Error('CANCELLED');
-    const outData = ffmpeg.FS('readFile', 'final.mp4');
+    const outData = ffmpeg.FS('readFile', `${outputName}.mp4`);
     const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
     chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url: progressUrl, itemId }).catch(() => { });
   } catch (e) {
@@ -200,20 +224,20 @@ async function handleProxyDownload(m) {
   if (isMerging) return;
   isMerging = true; isCancelled = false;
   const { url, outputName, itemId } = m;
-  
+
   try {
     sendProgress(5, url, t('fetching'), itemId);
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    
+
     const contentLength = +resp.headers.get('Content-Length');
     const reader = resp.body.getReader();
     let receivedLength = 0;
     let chunks = [];
-    
-    while(true) {
+
+    while (true) {
       if (isCancelled) throw new Error('CANCELLED');
-      const {done, value} = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
       chunks.push(value);
       receivedLength += value.length;
@@ -221,7 +245,7 @@ async function handleProxyDownload(m) {
         sendProgress(Math.round((receivedLength / contentLength) * 95), url, t('fetching'), itemId);
       }
     }
-    
+
     const blob = new Blob(chunks, { type: resp.headers.get('Content-Type') || 'video/mp4' });
     const blobUrl = URL.createObjectURL(blob);
     chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url, itemId, isProxy: true });

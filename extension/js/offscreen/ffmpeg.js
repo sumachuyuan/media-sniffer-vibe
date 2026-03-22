@@ -48,7 +48,7 @@ export async function runFFmpeg(ffmpeg, args) {
 
 const WORK_FILE_PATTERNS = [
     /^part_\d+\.ts$/,
-    /^(iv|ia|init|final)\.mp4$/,
+    /^(iv|ia|init|final|merged)\.mp4$/,
     /^concat\.txt$/,
 ];
 

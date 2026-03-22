@@ -30,11 +30,12 @@ export async function updateDnrRulesForFetch(referer, ua, urlFilter = '*', scope
     condition.initiatorDomains = [chrome.runtime.id];
   }
 
+  const rule = { id: ruleId, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [{ header: 'Referer', operation: 'set', value: referer }, { header: 'User-Agent', operation: 'set', value: ua }] }, condition };
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: ruleIdsToRemove,
-    addRules: [{ id: ruleId, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [{ header: 'Referer', operation: 'set', value: referer }, { header: 'User-Agent', operation: 'set', value: ua }] }, condition }]
+    addRules: [rule]
   });
-  logger.info(`DNR Rules updated for: ${condition.urlFilter}${scopeToExtension ? ' [extension-scoped]' : ''}`);
+  logger.info(`DNR Rules updated for: ${condition.urlFilter}${scopeToExtension ? ' [extension-scoped]' : ''}`, { referer });
 }
 
 export async function clearDnrRules() {
