@@ -20,6 +20,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 0. Initialize i18n
     await i18n.init();
 
+    // On-Demand Extraction for TikTok
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs[0] && tabs[0].url && tabs[0].url.includes('tiktok.com')) {
+        try {
+            await chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_TIKTOK' });
+            await new Promise(r => setTimeout(r, 150)); // Give background a moment to process
+        } catch (e) {}
+    }
+
     // 1. Initial Render & Status Sync
     renderUrls();
     syncMergeStatus();
