@@ -208,6 +208,8 @@ export function normalizeUrl(url) {
     // but only if it's a known fragment-heavy domain like Facebook or GoogleVideo
     if (u.hostname.includes('fbcdn.net') || u.hostname.includes('googlevideo.com')) {
       if (u.searchParams.has('range')) { u.searchParams.delete('range'); changed = true; }
+      if (u.searchParams.has('rn')) { u.searchParams.delete('rn'); changed = true; }
+      if (u.searchParams.has('rbuf')) { u.searchParams.delete('rbuf'); changed = true; }
     }
 
     if (changed) {
