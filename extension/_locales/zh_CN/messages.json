@@ -69,9 +69,8 @@
   "copyCmd": {
     "message": "CMD"
   },
-  "nativeMerge": {
-    "message": "合并下载"
-  },
+  "nativeMerge": { "message": "合并下载" },
+  "companionMerge": { "message": "配对合并" },
   "directDownload": {
     "message": "直链下载"
   },

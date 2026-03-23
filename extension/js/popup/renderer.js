@@ -145,7 +145,7 @@ export function renderCompanion(v, a, currentTab, state, onMerge) {
     div.innerHTML = `
         <div class="companion-header">${t('companionHeader')}</div>
         <div class="companion-actions">
-            <button id="compMerge" class="gold-btn">${t('nativeMerge')}</button>
+            <button id="compMerge" class="gold-btn">${t('companionMerge')}</button>
             <button id="compCopy" class="outline-btn" title="${t('copyCmdTooltip')}">${t('copyCmd')}</button>
         </div>
         <div id="companion-progress" style="display:none">

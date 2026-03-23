@@ -84,21 +84,56 @@ export function extractGroupTag(url) {
     const idPart = parts.find(p => p.length > 20 && /^[a-f0-9]+$/i.test(p));
     if (idPart) return `bili-${idPart.substring(0, 16)}`;
   }
-  const sessMatch = url.match(/[&?](session_id|sid|task_id|mt)=([^&]+)/i);
+  const sessMatch = url.match(/[&?](session_id|sid|task_id|mt|_nc_gid)=([^&]+)/i);
   if (sessMatch) return sessMatch[2];
+
+  // Fallback: Facebook video_id inside efg param
+  if (url.includes('efg=')) {
+    try {
+      const efgMatch = url.match(/[&?]efg=([^&]+)/);
+      if (efgMatch) {
+        const decoded = atob(decodeURIComponent(efgMatch[1]));
+        const vidMatch = decoded.match(/"video_id":(\d+)/);
+        if (vidMatch) return `fb-${vidMatch[1]}`;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   return null;
 }
 
 export function detectMediaType(url) {
   const urlLower = url.toLowerCase();
-  if (urlLower.includes('media-audio') || urlLower.includes('v-ams')) return 'audio';
-  if (urlLower.includes('media-video') || urlLower.includes('v-video')) return 'video';
-  if (urlLower.includes('.m4s')) {
-    if (urlLower.includes('video') || urlLower.includes('avc1') || urlLower.includes('hev1')) return 'video';
-    if (urlLower.includes('audio') || urlLower.includes('mp4a')) return 'audio';
+  
+  // 1. Direct Keywords (highest priority)
+  if (urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('_audio') || urlLower.includes('/audio/') || urlLower.includes('/music/')) return 'audio';
+  if (urlLower.includes('mime=video') || urlLower.includes('type=video') || urlLower.includes('_video') || urlLower.includes('/video/')) return 'video';
+
+  // 2. Platform Specific: Facebook efg parameter (Base64 encoded JSON)
+  if (url.includes('efg=')) {
+    try {
+      const efgMatch = url.match(/[&?]efg=([^&]+)/);
+      if (efgMatch) {
+         // Some environments might not have atob directly available in sniffer.js context if exported to offscreen
+         // but here it is in background script.
+         const decoded = atob(decodeURIComponent(efgMatch[1]));
+         if (decoded.includes('audio')) return 'audio';
+         if (decoded.includes('video')) return 'video';
+      }
+    } catch (e) { /* ignore parse error */ }
   }
-  if (urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('/audio/') || urlLower.includes('/music/') || urlLower.includes('.m4a') || urlLower.includes('.mp3') || urlLower.includes('.wav') || urlLower.includes('.aac') || urlLower.includes('.flac') || urlLower.includes('.opus')) return 'audio';
-  if (urlLower.includes('mime=video') || urlLower.includes('type=video') || urlLower.includes('/video/') || urlLower.includes('.webm') || urlLower.includes('.mp4') || urlLower.includes('.mkv') || urlLower.includes('.avi') || urlLower.includes('.mov') || urlLower.includes('.flv') || urlLower.includes('.f4v')) return 'video';
+
+  // 3. Fallback to common extensions
+  const audioExts = ['.m4a', '.mp3', '.wav', '.aac', '.flac', '.opus', '.m4s'];
+  if (audioExts.some(ext => urlLower.includes(ext))) {
+     // Check if .m4s is actually video (it can be both)
+     if (urlLower.includes('.m4s') && (urlLower.includes('video') || urlLower.includes('avc1') || urlLower.includes('hev1'))) return 'video';
+     return 'audio';
+  }
+
+  const videoExts = ['.webm', '.mp4', '.mkv', '.avi', '.mov', '.flv', '.f4v', '.ts'];
+  if (videoExts.some(ext => urlLower.includes(ext))) return 'video';
+
   return null;
 }
 
@@ -138,4 +173,27 @@ export function isValidMediaMime(mimeType, url = '') {
   }
 
   return false;
+}
+
+export function normalizeUrl(url) {
+  if (!url) return url;
+  try {
+    const u = new URL(url);
+    let changed = false;
+    if (u.searchParams.has('bytestart')) { u.searchParams.delete('bytestart'); changed = true; }
+    if (u.searchParams.has('byteend')) { u.searchParams.delete('byteend'); changed = true; }
+    
+    // Also handle standard range/bytes params if they are likely for DASH fragments
+    // but only if it's a known fragment-heavy domain like Facebook or GoogleVideo
+    if (u.hostname.includes('fbcdn.net') || u.hostname.includes('googlevideo.com')) {
+      if (u.searchParams.has('range')) { u.searchParams.delete('range'); changed = true; }
+    }
+
+    if (changed) {
+      const normalized = u.toString();
+      logger.info(`URL Normalized: ${normalized.substring(0, 100)}...`);
+      return normalized;
+    }
+  } catch (e) { /* ignore */ }
+  return url;
 }

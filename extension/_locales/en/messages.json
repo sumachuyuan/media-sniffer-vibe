@@ -20,6 +20,7 @@
   "taskLock": { "message": "Another task in progress..." },
   "copyCmd": { "message": "CMD" },
   "nativeMerge": { "message": "MERGE & DOWNLOAD" },
+  "companionMerge": { "message": "EXTRACT & JOIN" },
   "directDownload": { "message": "DIRECT" },
   "play": { "message": "PLAY" },
   "close": { "message": "✕" },

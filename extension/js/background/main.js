@@ -5,7 +5,7 @@ import { logger, DEBUG } from '../common/logger.js';
 import { state, cleanTab, resetGlobalMergeStatus } from './storage.js';
 import {
   MEDIA_SIGNATURES, NOISE_KEYWORDS, isNoiseFragment,
-  extractGroupTag, detectMediaType, isValidMediaMime, isVerifiedMedia
+  extractGroupTag, detectMediaType, isValidMediaMime, isVerifiedMedia, normalizeUrl
 } from './sniffer.js';
 import { parseM3U8, parseMPD, parseHlsSegments, parseDashSegments } from './parser.js';
 import {
@@ -72,9 +72,11 @@ async function addMedia(tabId, url, title, qualities = null, encryption = null, 
 // --- Network Listener ---
 chrome.webRequest.onBeforeRequest.addListener(
   async (details) => {
-    const { url, tabId } = details;
+    const { tabId } = details;
+    let { url } = details;
     if (tabId === -1) return;
 
+    url = normalizeUrl(url);
     const urlLower = url.toLowerCase();
     if (MEDIA_SIGNATURES.some(sig => urlLower.includes(sig))) {
       if (NOISE_KEYWORDS.some(kw => url.includes(kw))) return;
@@ -132,8 +134,12 @@ chrome.webRequest.onBeforeRequest.addListener(
 // --- Universal MIME Sniffer (Tier 2 Fallback) ---
 chrome.webRequest.onResponseStarted.addListener(
   async (details) => {
-    const { url, tabId, responseHeaders, type } = details;
+    const { tabId, responseHeaders, type } = details;
+    let { url } = details;
     if (tabId === -1 || state.processingUrls.has(url)) return;
+
+    url = normalizeUrl(url);
+    if (state.processingUrls.has(url)) return;
 
     // Skip common non-media types early
     const skipTypes = ['main_frame', 'sub_frame', 'stylesheet', 'script', 'font', 'image'];
@@ -205,7 +211,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (tabId !== -1 && url && isManualExtract && senderUrl.includes('tiktok.com')) {
       addMedia(tabId, url, title || (sender.tab ? sender.tab.title : null));
     }
-    return true;
   }
 
   if (type === 'GET_URLS') {
@@ -217,7 +222,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (type === 'GET_MERGE_STATUS') {
     sendResponse(state.globalMergeStatus);
-    return true;
   }
 
   if (type === 'CLEAR_URLS') {
@@ -295,10 +299,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.action.setBadgeText({ text: '' }).catch(() => { });
     clearDnrRules().catch(logger.error);
     setTimeout(() => chrome.offscreen.closeDocument().catch(() => { }), 500);
-    return true;
+    sendResponse({ status: 'cancelled' });
   }
 
-  if (type === 'FFMPEG_READY') { handleOffscreenReady(); return true; }
+  if (type === 'FFMPEG_READY') { handleOffscreenReady(); sendResponse({ status: 'ready' }); }
 
   if (type === 'FFMPEG_PROGRESS') {
     const stage = chrome.i18n.getMessage(request.stage) || request.stage;
@@ -307,7 +311,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.action.setBadgeText({ text: `${Math.round(request.progress)}%` }).catch(() => { });
     chrome.action.setBadgeBackgroundColor({ color: '#ffcc00' }).catch(() => { });
     chrome.runtime.sendMessage(request).catch(() => { });
-    return true;
+    sendResponse({ status: 'progress_updated' });
   }
 
   if (type === 'FFMPEG_COMPLETE' || type === 'FFMPEG_ERROR') {
@@ -335,8 +339,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else {
       closeOffscreen();
     }
-    return true;
   }
 
-  if (type === 'DEBUG_LOG') { logger.debug(request.content); return true; }
+  if (type === 'DEBUG_LOG') { 
+    logger.debug(request.content); 
+    sendResponse({ status: 'logged' });
+  }
 });
