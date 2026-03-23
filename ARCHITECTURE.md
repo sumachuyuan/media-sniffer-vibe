@@ -1,6 +1,6 @@
 # Media Sniffer Vibe — 架构文档
 
-> 版本：v1.38.9 · 最后更新：2026-03-23
+> 版本：v1.38.10 · 最后更新：2026-03-23
 
 ---
 
@@ -13,6 +13,7 @@
 5. [消息流与数据流](#5-消息流与数据流)
 6. [核心功能详解](#6-核心功能详解)
 7. [关键设计决策](#7-关键设计决策)
+8. [如何贡献新平台规则](#8-如何贡献新平台规则)
 
 ---
 
@@ -363,6 +364,40 @@ Service Worker 没有 DOM 环境，FFmpeg.wasm 依赖 Web Worker 和部分 DOM A
 ### 7.4 为什么 `parseDashSegments` 使用 DOMParser 而非正则？
 
 MPD 是 XML，正则无法正确处理属性顺序、命名空间、嵌套结构等情况。DOMParser 在 Chrome Service Worker 中可用（Chrome 99+），且 MV3 已要求 Chrome 88+，版本范围安全。
+
+---
+
+## 8. 如何贡献新平台规则
+
+`platforms.js` 是 Vibe 的核心配置中心。如果你想支持一个新站点，只需遵循以下“接口协议”：
+
+### 8.1 规则模板
+在 `extension/js/background/platforms.js` 的 `PLATFORM_RULES` 数组中添加一个新对象：
+
+```javascript
+{
+  id: 'mysite',
+  // 1. 匹配逻辑：返回 true 则应用此条规则
+  match: (url) => url.includes('mysite.com'), 
+
+  // 2. 配对逻辑：从视频/音频 URL 中提取共同的 ID（用于合并）
+  groupTag: (url) => url.match(/vid=([^&]+)/)?.[1], 
+
+  // 3. 类型识别：返回 'audio' 或 'video'（可选，不填则根据后缀判断）
+  mediaType: (url) => url.includes('/audio/') ? 'audio' : 'video', 
+
+  // 4. 去重清理：URL 中哪些参数在去重时应该被忽略（如随机数、时间戳）
+  normalizeParams: ['token', 'ts'], 
+
+  // 5. 代理下载：是否需要通过 Offscreen 伪造 Referer 下载（防盗链）
+  proxyRequired: true 
+}
+```
+
+### 8.2 提交建议
+1. **先观察控制台**：运行插件并开启 `DEBUG=true`，观察目标站点的网络请求规律。
+2. **测试去重**：确保 `normalizeParams` 能覆盖所有变化的参数，避免列表爆炸。
+3. **验证配对**：检查配对后的 `groupTag` 是否一致，确保 Popup 能渲染出合并卡片。
 
 ---
 
