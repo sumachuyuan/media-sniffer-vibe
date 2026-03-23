@@ -81,6 +81,12 @@ export function extractGroupTag(url) {
     const tridMatch = url.match(/[&?]trid=([a-f0-9]+)/i);
     if (tridMatch) return `bili-${tridMatch[1].substring(0, 16)}`;
     const parts = url.split('/');
+    // Reddit (v.redd.it) usually has a 13-character alphanumeric ID in the path
+    if (urlLower.includes('v.redd.it')) {
+       // URL: https://v.redd.it/djluxgvqrypg1/CMAF_720.mp4
+       const idPart = parts.find(p => p.length >= 10 && p.length <= 15);
+       if (idPart) return `reddit-${idPart}`;
+    }
     const idPart = parts.find(p => p.length > 20 && /^[a-f0-9]+$/i.test(p));
     if (idPart) return `bili-${idPart.substring(0, 16)}`;
   }
