@@ -72,6 +72,8 @@ export function isNoiseFragment(url) {
 export function extractGroupTag(url) {
   const urlLower = url.toLowerCase();
   if (urlLower.includes('googlevideo.com')) {
+    const cpnMatch = url.match(/[&?]cpn=([^&]+)/);
+    if (cpnMatch) return `yt-cpn-${cpnMatch[1]}`;
     const match = url.match(/[&?]id=([^&]+)/);
     if (match) return `yt-${match[1]}`;
     const pathMatch = url.match(/\/id\/([^\/\?]+)/);
@@ -113,9 +115,19 @@ export function detectMediaType(url) {
   
   // 1. Direct Keywords (highest priority)
   if (urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('_audio') || urlLower.includes('/audio/') || urlLower.includes('/music/')) return 'audio';
-  if (urlLower.includes('mime=video') || urlLower.includes('type=video') || urlLower.includes('_video') || urlLower.includes('/video/')) return 'video';
+  // 2. Platform Specific: YouTube itags
+  if (urlLower.includes('googlevideo.com')) {
+    const itagMatch = url.match(/[&?]itag=(\d+)/);
+    if (itagMatch) {
+      const itag = parseInt(itagMatch[1]);
+      // Audio itags: 139 (m4a), 140 (m4a), 141 (m4a), 171 (webm), 172 (webm), 249 (opus), 250 (opus), 251 (opus)
+      const audioItags = [139, 140, 141, 171, 172, 249, 250, 251];
+      if (audioItags.includes(itag)) return 'audio';
+      return 'video';
+    }
+  }
 
-  // 2. Platform Specific: Facebook efg parameter (Base64 encoded JSON)
+  // 3. Platform Specific: Facebook efg parameter (Base64 encoded JSON)
   if (url.includes('efg=')) {
     try {
       const efgMatch = url.match(/[&?]efg=([^&]+)/);
