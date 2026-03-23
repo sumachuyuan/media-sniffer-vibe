@@ -15,16 +15,31 @@ export function createUrlItem(item, tab, state, searchTerm = '') {
     const time = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const urlLower = item.url.toLowerCase();
 
-    let protocol = 'EXT', protocolColor = '#444';
-    const isDirectFile = urlLower.includes('.mp4') || urlLower.includes('.mp3') || urlLower.includes('.m4a') || urlLower.includes('.wav') || urlLower.includes('.aac') || urlLower.includes('douyinvod.com') || urlLower.includes('/video/tos/') || urlLower.includes('tiktokv.com');
-    
-    if (urlLower.includes('.m3u8')) protocol = 'M3U8', protocolColor = 'var(--gold-primary)';
-    else if (isDirectFile) {
-        if (urlLower.includes('.mp3')) protocol = 'MP3', protocolColor = '#ff44aa';
-        else if (urlLower.includes('.m4a') || urlLower.includes('.wav') || urlLower.includes('.aac')) protocol = 'AUDIO', protocolColor = '#8855ff';
-        else protocol = 'MP4', protocolColor = '#00aaff';
+    let protocol = 'FILE', protocolColor = '#444';
+    if (urlLower.includes('.m3u8')) {
+        protocol = 'M3U8';
+        protocolColor = 'var(--gold-primary)';
+    } else if (urlLower.includes('.mpd')) {
+        protocol = 'MPD';
+        protocolColor = '#ff5500';
+    } else {
+        // Dynamic Extension Detection
+        try {
+            const urlPath = new URL(item.url).pathname;
+            const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
+            if (extMatch) {
+                protocol = extMatch[1].toUpperCase();
+            } else if (item.mediaType) {
+                protocol = item.mediaType.toUpperCase();
+            }
+        } catch (e) {
+            if (item.mediaType) protocol = item.mediaType.toUpperCase();
+        }
+
+        // Dynamic Coloring
+        if (item.mediaType === 'audio') protocolColor = '#8855ff';
+        else if (item.mediaType === 'video') protocolColor = '#00aaff';
     }
-    else if (urlLower.includes('.mpd')) protocol = 'MPD', protocolColor = '#ff5500';
 
     let typeBadge = '';
     if (item.mediaType === 'video') typeBadge = `<span class="badge-video">${t('video')}</span>`;
@@ -61,8 +76,11 @@ export function createUrlItem(item, tab, state, searchTerm = '') {
                     data-encryption="${item.encryption ? escapeHtml(JSON.stringify(item.encryption)) : ''}">
                     ${t('nativeMerge')}
                 </button>
-            ` : ''}
-            ${(isDirectFile) ? `<button class="direct-download" data-url="${item.url}" data-filename="${filename}">${t('directDownload')}</button>` : ''}
+            ` : `
+                <button class="direct-download" data-url="${item.url}" data-filename="${filename}">
+                    ${t('directDownload')}
+                </button>
+            `}
             <button class="play-btn" data-url="${item.url}" data-id="${item.id}">${t('play')}</button>
             <button class="copy-btn" data-url="${item.url}" title="${t('copyUrlTooltip')}">${t('url')}</button>
         `;

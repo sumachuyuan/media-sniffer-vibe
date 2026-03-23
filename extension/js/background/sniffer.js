@@ -97,8 +97,8 @@ export function detectMediaType(url) {
     if (urlLower.includes('video') || urlLower.includes('avc1') || urlLower.includes('hev1')) return 'video';
     if (urlLower.includes('audio') || urlLower.includes('mp4a')) return 'audio';
   }
-  if (urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('/audio/') || urlLower.includes('/music/') || urlLower.includes('.m4a')) return 'audio';
-  if (urlLower.includes('mime=video') || urlLower.includes('type=video') || urlLower.includes('/video/')) return 'video';
+  if (urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('/audio/') || urlLower.includes('/music/') || urlLower.includes('.m4a') || urlLower.includes('.mp3') || urlLower.includes('.wav') || urlLower.includes('.aac') || urlLower.includes('.flac') || urlLower.includes('.opus')) return 'audio';
+  if (urlLower.includes('mime=video') || urlLower.includes('type=video') || urlLower.includes('/video/') || urlLower.includes('.webm') || urlLower.includes('.mp4') || urlLower.includes('.mkv') || urlLower.includes('.avi') || urlLower.includes('.mov') || urlLower.includes('.flv') || urlLower.includes('.f4v')) return 'video';
   return null;
 }
 
