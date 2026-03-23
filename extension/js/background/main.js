@@ -251,17 +251,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (type === 'START_FFMPEG_MERGE') {
     logger.info(`START_FFMPEG_MERGE initiated for: ${request.outputName}`, { segments: request.segments?.length });
-    state.globalMergeStatus = { 
-      isMerging: true, 
-      itemId: request.itemId, 
-      url: request.manifestUrl || request.videoUrl, 
-      title: request.outputName, // Added title for global tracking
-      progress: 0, 
-      stage: chrome.i18n.getMessage('initializing') 
+    state.globalMergeStatus = {
+      isMerging: true,
+      itemId: request.itemId,
+      url: request.manifestUrl || request.videoUrl,
+      title: request.outputName,
+      progress: 0,
+      stage: chrome.i18n.getMessage('initializing')
     };
     const targetUrl = request.manifestUrl || request.videoUrl || '*';
     updateDnrRulesForFetch(request.referer, request.ua, targetUrl, true).then(() => handleFfmpegMerge(request));
-    return true;
+    sendResponse({ status: 'queued' });
   }
 
   if (type === 'START_DIRECT_DOWNLOAD') {
@@ -290,7 +290,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (type === 'CLEAR_DNR_RULES') {
     clearDnrRules().catch(logger.error);
-    return true;
   }
 
   if (type === 'CANCEL_FFMPEG_MERGE') {
