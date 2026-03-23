@@ -2,7 +2,7 @@
  * Sovereign Logger - Debug Configuration
  * Set DEBUG = true to enable detailed execution logs in the console.
  */
-export const DEBUG = true;
+export const DEBUG = false;
 
 export const logger = {
   info: (msg, data) => {
