@@ -7,6 +7,7 @@ import {
   MEDIA_SIGNATURES, NOISE_KEYWORDS, isNoiseFragment,
   extractGroupTag, detectMediaType, isValidMediaMime, isVerifiedMedia, normalizeUrl
 } from './sniffer.js';
+import { PLATFORM_RULES } from './platforms.js';
 import { parseM3U8, parseMPD, parseHlsSegments, parseDashSegments } from './parser.js';
 import {
   handleFfmpegMerge, handleProxyDownload,
@@ -264,7 +265,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (type === 'START_DIRECT_DOWNLOAD') {
-    const isSensitive = request.url.includes('tiktok.com') || request.url.includes('douyinvod.com') || request.url.includes('bilibili.com');
+    const isSensitive = PLATFORM_RULES.some(r => r.proxyRequired && r.match(request.url.toLowerCase()));
     updateDnrRulesForFetch(request.referer, request.ua, request.url).then(() => {
       if (isSensitive) {
         handleProxyDownload({ ...request, outputName: request.filename });

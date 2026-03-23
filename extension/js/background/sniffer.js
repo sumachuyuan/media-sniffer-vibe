@@ -2,6 +2,7 @@
  * Sovereign Sniffer - Logic for intercepting and filtering URLs
  */
 import { logger } from '../common/logger.js';
+import { PLATFORM_RULES } from './platforms.js';
 
 
 export const MEDIA_SIGNATURES = [
@@ -21,10 +22,10 @@ export function isVerifiedMedia(url) {
 }
 
 export const VALID_MEDIA_MIMES = [
-  'video/', 
-  'audio/', 
-  'application/x-mpegURL', 
-  'application/dash+xml', 
+  'video/',
+  'audio/',
+  'application/x-mpegURL',
+  'application/dash+xml',
   'application/vnd.apple.mpegurl',
   'application/octet-stream'
 ];
@@ -73,83 +74,36 @@ export function isNoiseFragment(url) {
 
 export function extractGroupTag(url) {
   const urlLower = url.toLowerCase();
-  if (urlLower.includes('googlevideo.com')) {
-    const cpnMatch = url.match(/[&?]cpn=([^&]+)/);
-    if (cpnMatch) return `yt-cpn-${cpnMatch[1]}`;
-    const match = url.match(/[&?]id=([^&]+)/);
-    if (match) return `yt-${match[1]}`;
-    const pathMatch = url.match(/\/id\/([^\/\?]+)/);
-    if (pathMatch) return `yt-${pathMatch[1]}`;
-  }
-  if (urlLower.includes('.m4s') || urlLower.includes('bilivideo.com')) {
-    const tridMatch = url.match(/[&?]trid=([a-f0-9]+)/i);
-    if (tridMatch) return `bili-${tridMatch[1].substring(0, 16)}`;
-    const parts = url.split('/');
-    // Reddit (v.redd.it) usually has a 13-character alphanumeric ID in the path
-    if (urlLower.includes('v.redd.it')) {
-       // URL: https://v.redd.it/djluxgvqrypg1/CMAF_720.mp4
-       const idPart = parts.find(p => p.length >= 10 && p.length <= 15);
-       if (idPart) return `reddit-${idPart}`;
+  for (const rule of PLATFORM_RULES) {
+    if (rule.groupTag && rule.match(urlLower)) {
+      const tag = rule.groupTag(url);
+      if (tag) return tag;
     }
-    const idPart = parts.find(p => p.length > 20 && /^[a-f0-9]+$/i.test(p));
-    if (idPart) return `bili-${idPart.substring(0, 16)}`;
   }
-  const sessMatch = url.match(/[&?](session_id|sid|task_id|mt|_nc_gid|logid|l)=([^&]+)/i);
-  if (sessMatch) return sessMatch[2];
-
-  // Fallback: Facebook video_id inside efg param
-  if (url.includes('efg=')) {
-    try {
-      const efgMatch = url.match(/[&?]efg=([^&]+)/);
-      if (efgMatch) {
-        const decoded = atob(decodeURIComponent(efgMatch[1]));
-        const vidMatch = decoded.match(/"video_id":(\d+)/);
-        if (vidMatch) return `fb-${vidMatch[1]}`;
-      }
-    } catch (e) { /* ignore */ }
-  }
-
-  return null;
+  // Generic fallback for session/task IDs common across platforms
+  return url.match(/[&?](session_id|sid|task_id|mt|_nc_gid|logid|l)=([^&]+)/i)?.[2] ?? null;
 }
 
 export function detectMediaType(url) {
   const urlLower = url.toLowerCase();
-  
-  // 1. Direct Keywords (highest priority)
+
+  // 1. Direct keywords (highest priority, platform-agnostic)
   if (urlLower.includes('media-audio') || urlLower.includes('v-ams') || urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('_audio') || urlLower.includes('/audio/') || urlLower.includes('/music/')) return 'audio';
   if (urlLower.includes('media-video') || urlLower.includes('v-video') || urlLower.includes('mime=video') || urlLower.includes('type=video') || urlLower.includes('_video') || urlLower.includes('/video/')) return 'video';
-  // 2. Platform Specific: YouTube itags
-  if (urlLower.includes('googlevideo.com')) {
-    const itagMatch = url.match(/[&?]itag=(\d+)/);
-    if (itagMatch) {
-      const itag = parseInt(itagMatch[1]);
-      // Audio itags: 139 (m4a), 140 (m4a), 141 (m4a), 171 (webm), 172 (webm), 249 (opus), 250 (opus), 251 (opus)
-      const audioItags = [139, 140, 141, 171, 172, 249, 250, 251];
-      if (audioItags.includes(itag)) return 'audio';
-      return 'video';
+
+  // 2. Platform rules (itag lists, efg decoding, etc.)
+  for (const rule of PLATFORM_RULES) {
+    if (rule.mediaType && rule.match(urlLower)) {
+      const type = rule.mediaType(url);
+      if (type) return type;
     }
   }
 
-  // 3. Platform Specific: Facebook efg parameter (Base64 encoded JSON)
-  if (url.includes('efg=')) {
-    try {
-      const efgMatch = url.match(/[&?]efg=([^&]+)/);
-      if (efgMatch) {
-         // Some environments might not have atob directly available in sniffer.js context if exported to offscreen
-         // but here it is in background script.
-         const decoded = atob(decodeURIComponent(efgMatch[1]));
-         if (decoded.includes('audio')) return 'audio';
-         if (decoded.includes('video')) return 'video';
-      }
-    } catch (e) { /* ignore parse error */ }
-  }
-
-  // 3. Fallback to common extensions
+  // 3. Fallback to common file extensions
   const audioExts = ['.m4a', '.mp3', '.wav', '.aac', '.flac', '.opus', '.m4s'];
   if (audioExts.some(ext => urlLower.includes(ext))) {
-     // Check if .m4s is actually video (it can be both)
-     if (urlLower.includes('.m4s') && (urlLower.includes('video') || urlLower.includes('avc1') || urlLower.includes('hev1'))) return 'video';
-     return 'audio';
+    if (urlLower.includes('.m4s') && (urlLower.includes('video') || urlLower.includes('avc1') || urlLower.includes('hev1'))) return 'video';
+    return 'audio';
   }
 
   const videoExts = ['.webm', '.mp4', '.mkv', '.avi', '.mov', '.flv', '.f4v', '.ts'];
@@ -164,24 +118,22 @@ export function isValidMediaMime(mimeType, url = '') {
   const urlLower = url.toLowerCase();
 
   // Strict rejection for known image signatures in the URL
-  // This prevents fake octet-streams or weird CDN paths from bypassing length checks
   const imageSigns = ['.image', '.webp', '.jpg', '.jpeg', '.png', '.gif', '.avif', '~tplv-'];
   if (imageSigns.some(s => urlLower.includes(s))) {
     return false;
   }
-  
+
   if (mimeLower.startsWith('video/') || mimeLower.startsWith('audio/')) return true;
-  
+
   const manifests = [
-    'application/x-mpegURL', 
-    'application/dash+xml', 
+    'application/x-mpegURL',
+    'application/dash+xml',
     'application/vnd.apple.mpegurl'
   ];
   if (manifests.some(m => mimeLower.includes(m))) return true;
 
   // Special case: octet-stream for actual media files (media extension or known API path)
   if (mimeLower.includes('application/octet-stream')) {
-    const urlLower = url.toLowerCase();
     const mediaExts = ['.m3u8', '.mpd', '.mp4', '.ts', '.m4s', '.m4a', '.webm', '.mp3', '.wav', '.aac', '.flac'];
     if (mediaExts.some(ext => urlLower.includes(ext))) return true;
     // Feishu/Lark video API paths (no media extension in URL)
@@ -201,15 +153,21 @@ export function normalizeUrl(url) {
   try {
     const u = new URL(url);
     let changed = false;
-    if (u.searchParams.has('bytestart')) { u.searchParams.delete('bytestart'); changed = true; }
-    if (u.searchParams.has('byteend')) { u.searchParams.delete('byteend'); changed = true; }
-    
-    // Also handle standard range/bytes params if they are likely for DASH fragments
-    // but only if it's a known fragment-heavy domain like Facebook or GoogleVideo
-    if (u.hostname.includes('fbcdn.net') || u.hostname.includes('googlevideo.com')) {
-      if (u.searchParams.has('range')) { u.searchParams.delete('range'); changed = true; }
-      if (u.searchParams.has('rn')) { u.searchParams.delete('rn'); changed = true; }
-      if (u.searchParams.has('rbuf')) { u.searchParams.delete('rbuf'); changed = true; }
+
+    // Universal: strip byte-range params that create duplicate entries for the same stream
+    for (const param of ['bytestart', 'byteend']) {
+      if (u.searchParams.has(param)) { u.searchParams.delete(param); changed = true; }
+    }
+
+    // Platform-specific: strip params declared by the first matching rule
+    const urlLower = url.toLowerCase();
+    for (const rule of PLATFORM_RULES) {
+      if (rule.normalizeParams.length > 0 && rule.match(urlLower)) {
+        for (const param of rule.normalizeParams) {
+          if (u.searchParams.has(param)) { u.searchParams.delete(param); changed = true; }
+        }
+        break;
+      }
     }
 
     if (changed) {
