@@ -214,14 +214,14 @@ async function handleMergeSegments(m) {
 
     sendProgress(95, progressUrl, t('merging'), itemId);
     logger.info(`FFmpeg starting with args: ${finalArgs.join(' ')}`);
-    sendProgress(95, progressUrl, t('merging'), itemId);
-    
-    await ffmpeg.run(...finalArgs);
+
+    const result = await runFFmpeg(ffmpeg, finalArgs);
+    if (result !== 0) throw new Error('FFMPEG_EXEC_ERROR: Segment merge failed.');
     logger.info(`FFmpeg process completed for ${outputName}`);
     if (isCancelled) throw new Error('CANCELLED');
     const outData = ffmpeg.FS('readFile', `${outputName}.mp4`);
     const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
-    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url: progressUrl, itemId }).catch(() => { });
+    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: `${outputName}.mp4`, url: progressUrl, itemId }).catch(() => { });
   } catch (e) {
     if (e.message !== 'CANCELLED') {
       logger.error('Segment Merge FATAL Error', e);
@@ -262,10 +262,10 @@ async function handleProxyDownload(m) {
 
     const blob = new Blob(chunks, { type: resp.headers.get('Content-Type') || 'video/mp4' });
     const blobUrl = URL.createObjectURL(blob);
-    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url, itemId, isProxy: true });
+    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: `${outputName}.mp4`, url, itemId, isProxy: true });
   } catch (e) {
     if (e.message !== 'CANCELLED') {
-      console.error('Proxy Download Error', e);
+      logger.error('Proxy Download Error', e);
       chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url, itemId, isProxy: true });
     }
   } finally {

@@ -333,7 +333,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Close offscreen only after the download is registered so the browser has
       // captured the blob before the document (and its blob URLs) are destroyed.
       chrome.downloads.download(
-        { url: request.blobUrl || request.dataUrl, filename: `${request.filename}.mp4`, saveAs: true },
+        { url: request.blobUrl || request.dataUrl, filename: request.filename, saveAs: true },
         closeOffscreen
       );
     } else {
