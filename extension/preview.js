@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const mediaUrl = params.get('url');
     const title = params.get('title') || 'Untitled Stream';
+    const autoSnapshot = params.get('autoSnapshot') === '1';
 
     if (!mediaUrl) {
         statusEl.textContent = 'ERROR: No URL provided';
@@ -23,6 +24,13 @@ document.addEventListener('DOMContentLoaded', () => {
         loadDASH(mediaUrl);
     } else {
         loadDirect(mediaUrl);
+    }
+
+    if (autoSnapshot) {
+        video.addEventListener('loadeddata', () => {
+            // 给一点点缓冲时间确保首帧渲染完成
+            setTimeout(takeSnapshot, 1000);
+        }, { once: true });
     }
 
     function loadHLS(url) {
@@ -77,5 +85,47 @@ document.addEventListener('DOMContentLoaded', () => {
         errorEl.style.display = 'block';
         statusEl.style.color = '#ff4444';
         statusEl.textContent = 'PLAYBACK FAILED';
+    }
+
+    // --- Snapshot Functionality ---
+    const snapshotBtn = document.getElementById('snapshot-btn');
+    
+    // Hide snapshot for audio
+    const mediaType = params.get('mediaType');
+    if (mediaType === 'audio') {
+        snapshotBtn.style.display = 'none';
+    }
+
+    snapshotBtn.addEventListener('click', takeSnapshot);
+
+    function takeSnapshot() {
+        if (!video.videoWidth || !video.videoHeight) {
+            alert('视频尚未加载或无法截取');
+            return;
+        }
+
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const fileName = `${title.replace(/[/\\?%*:|"<>]/g, '-')}_Snapshot_${timestamp}.png`;
+
+            canvas.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.click();
+                URL.revokeObjectURL(url);
+                console.log(`Snapshot saved: ${fileName}`);
+            }, 'image/png');
+        } catch (e) {
+            console.error('Snapshot failed', e);
+            alert('快照失败：可能是由于跨域(CORS)限制，暂时无法直接截取该站点的视频帧。');
+        }
     }
 });

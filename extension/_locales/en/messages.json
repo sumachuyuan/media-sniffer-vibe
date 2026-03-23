@@ -52,5 +52,7 @@
   "toastHighPerfOn": { "message": "🚀 High Performance: Multi-threaded fetching enabled" },
   "toastHighPerfOff": { "message": "🛡️ Safe Mode: Sequential fetching for stability" },
   "perfToggleTooltip": { "message": "Performance Toggle (🚀 Multi-threaded / 🛡️ Sequential)" },
-  "langToggleTooltip": { "message": "Switch Language (🌐 English / Chinese)" }
+  "langToggleTooltip": { "message": "Switch Language (🌐 English / Chinese)" },
+  "snapshot": { "message": "Snapshot" },
+  "snapshotTooltip": { "message": "Save current video frame as high-quality PNG" }
 }

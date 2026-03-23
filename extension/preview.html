@@ -98,6 +98,31 @@
       transform: scale(1.05);
     }
 
+    .snapshot-btn {
+      background: var(--gold);
+      color: black;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s;
+    }
+
+    .snapshot-btn:hover {
+      background: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
+    }
+
+    .snapshot-btn:active {
+      transform: translateY(0);
+    }
+
     #error-msg {
       display: none;
       color: #ff4444;
@@ -115,8 +140,13 @@
   </div>
 
   <div id="info-bar">
-    <div class="title" id="video-title">Loading Stream...</div>
-    <div class="status" id="video-status">Detecting Format</div>
+    <div style="display: flex; flex-direction: column; max-width: 60%;">
+      <div class="title" id="video-title" style="max-width: 100%;">Loading Stream...</div>
+      <div class="status" id="video-status">Detecting Format</div>
+    </div>
+    <button id="snapshot-btn" class="snapshot-btn">
+      拍照
+    </button>
   </div>
 
   <script src="hls.min.js"></script>

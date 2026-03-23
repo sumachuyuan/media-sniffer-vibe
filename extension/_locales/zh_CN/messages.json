@@ -122,5 +122,7 @@
   "toastHighPerfOn": { "message": "🚀 高能模式：多线程快速抓取已开启" },
   "toastHighPerfOff": { "message": "🛡️ 安全模式：单线程稳定执行" },
   "perfToggleTooltip": { "message": "性能切换 (🚀 多线程极速 / 🛡️ 单线程稳定)" },
-  "langToggleTooltip": { "message": "切换语言 (🌐 中文 / English)" }
+  "langToggleTooltip": { "message": "切换语言 (🌐 中文 / English)" },
+  "snapshot": { "message": "拍照" },
+  "snapshotTooltip": { "message": "保存当前视频帧为高清 PNG" }
 }

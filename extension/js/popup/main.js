@@ -204,7 +204,7 @@ function bindEvents(tab) {
         chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE', url: btn.dataset.url });
         resetUI(); renderUrls();
     });
-    document.querySelectorAll('.play-btn').forEach(btn => btn.onclick = () => startEmbeddedPreview(btn.dataset.url, btn.dataset.id));
+    document.querySelectorAll('.play-btn').forEach(btn => btn.onclick = () => startEmbeddedPreview(btn.dataset.url, btn.dataset.id, btn.dataset.title, btn.dataset.mediaType));
     document.querySelectorAll('.quality-tag').forEach(tag => {
         tag.onclick = (e) => {
             e.stopPropagation();
@@ -230,9 +230,17 @@ function teardownActiveHls() {
     }
 }
 
-function startEmbeddedPreview(url, uid) {
+function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown') {
     const container = document.getElementById(`preview-container-${uid}`);
     if (!container) return;
+
+    // 0. Detect if audio-only stream (Only videos show snapshot)
+    const isAudio = mediaType === 'audio' ||
+        url.toLowerCase().includes('.mp3') ||
+        url.toLowerCase().includes('.aac') ||
+        url.toLowerCase().includes('.m4a') ||
+        url.toLowerCase().includes('.ogg') ||
+        url.toLowerCase().includes('.wav');
 
     // 1. If same, toggle off
     if (window.activePreviewUid === uid) {
@@ -252,11 +260,18 @@ function startEmbeddedPreview(url, uid) {
     // 3. Setup new
     container.style.display = 'block';
     container.innerHTML = `
-        <div class="preview-header" style="display:flex; justify-content:flex-end; padding:4px;">
-            <div class="preview-close" style="cursor:pointer; color:var(--gold-primary); font-size:10px; font-weight:800;">${t('close')}</div>
+        <div class="preview-header" style="display:flex; justify-content:flex-end; padding:8px 12px; gap:12px; border-bottom:1px solid rgba(255,255,255,0.05); align-items:center;">
+            ${!isAudio ? `<div class="preview-snapshot">${t('snapshot')}</div>` : ''}
+            <div class="preview-close">${t('close')}</div>
         </div>
-        <video controls autoplay class="preview-video" style="width:100%; max-height:240px; background:#000;"></video>
+        <video controls autoplay class="preview-video" style="width:100%; max-height:240px; background:#000; display:block;"></video>
     `;
+
+    // Add hover effects via JS for simplicity in this dynamic injection
+    container.querySelectorAll('.preview-snapshot, .preview-close').forEach(el => {
+        el.onmouseover = () => el.style.opacity = '1';
+        el.onmouseout = () => el.style.opacity = '0.8';
+    });
 
     container.querySelector('.preview-close').onclick = () => {
         teardownActiveHls();
@@ -265,6 +280,30 @@ function startEmbeddedPreview(url, uid) {
     };
 
     const video = container.querySelector('video');
+    const snapshotBtn = container.querySelector('.preview-snapshot');
+
+    if (snapshotBtn) {
+        snapshotBtn.onclick = () => {
+            if (!video.videoWidth) {
+                ui.showToast(t('error'), 'error');
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            canvas.toBlob(blob => {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                const fileName = `${title.replace(/[/\\?%*:|"<>]/g, '-')}_Snapshot_${timestamp}.png`;
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = fileName;
+                a.click();
+                ui.showToast(t('complete'));
+            }, 'image/png');
+        };
+    }
+
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0];

@@ -65,7 +65,7 @@ export function createUrlItem(item, tab, state, searchTerm = '') {
     let actionHtml = state.mergingUrl === item.url
         ? `<button class="cancel-merge" data-url="${item.url}">${t('cancelMerge')}</button>`
         : state.mergingUrl ? `<div class="task-lock">${t('taskLock')}</div>`
-        : `
+            : `
             <button class="copy-cli" data-url="${item.url}" data-filename="${filename}" title="${t('copyCmdTooltip')}">${t('copyCmd')}</button>
             ${item.isSegmented ? `
                 <button class="native-merge" 
@@ -81,7 +81,7 @@ export function createUrlItem(item, tab, state, searchTerm = '') {
                     ${t('directDownload')}
                 </button>
             `}
-            <button class="play-btn" data-url="${item.url}" data-id="${item.id}">${t('play')}</button>
+            <button class="play-btn" data-url="${item.url}" data-id="${item.id}" data-title="${filename}" data-media-type="${item.mediaType || ''}">${t('play')}</button>
             <button class="copy-btn" data-url="${item.url}" title="${t('copyUrlTooltip')}">${t('url')}</button>
         `;
 
@@ -173,9 +173,9 @@ export function renderCompanion(v, a, currentTab, state, onMerge) {
 function highlightText(text, searchTerm) {
     if (!searchTerm) return escapeHtml(text);
     const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return text.split(regex).map(part => 
-        part.toLowerCase() === searchTerm.toLowerCase() 
-            ? `<mark class="search-highlight">${escapeHtml(part)}</mark>` 
+    return text.split(regex).map(part =>
+        part.toLowerCase() === searchTerm.toLowerCase()
+            ? `<mark class="search-highlight">${escapeHtml(part)}</mark>`
             : escapeHtml(part)
     ).join('');
 }
