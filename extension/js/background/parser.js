@@ -187,22 +187,91 @@ export async function parseDashSegments(mpdUrl) {
   try {
     const response = await fetch(mpdUrl);
     const text = await response.text();
-    const segments = [];
-    const baseUrl = mpdUrl.substring(0, mpdUrl.lastIndexOf('/') + 1);
-    const mediaMatch = text.match(/media=["']([^"']+)["']/);
-    const startMatch = text.match(/startNumber=["'](\d+)["']/);
-    if (mediaMatch) {
-      const mediaTemplate = mediaMatch[1], startNumber = parseInt(startMatch ? startMatch[1] : '1');
-      for (let i = 0; i < 50; i++) {
-        const segUrl = mediaTemplate.replace('$Number$', (startNumber + i).toString());
-        segments.push(segUrl.startsWith('http') ? segUrl : baseUrl + segUrl);
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    const mpd = doc.querySelector('MPD');
+    if (!mpd) return { segments: [], encryption: null, mapUrl: null };
+
+    // Resolve document base URL (prefer explicit <BaseURL> element)
+    const baseUrlEl = mpd.querySelector('BaseURL');
+    const baseUrl = baseUrlEl?.textContent
+      ? (baseUrlEl.textContent.startsWith('http') ? baseUrlEl.textContent : new URL(baseUrlEl.textContent, mpdUrl).href)
+      : mpdUrl.substring(0, mpdUrl.lastIndexOf('/') + 1);
+
+    // --- SegmentTemplate (most common: YouTube-like CDNs, CMAF) ---
+    const segTemplate = mpd.querySelector('SegmentTemplate');
+    if (segTemplate) {
+      const mediaAttr  = segTemplate.getAttribute('media');
+      const initAttr   = segTemplate.getAttribute('initialization');
+      const startNum   = parseInt(segTemplate.getAttribute('startNumber') || '1');
+      const timescale  = parseInt(segTemplate.getAttribute('timescale')   || '1');
+      const segDur     = parseInt(segTemplate.getAttribute('duration')    || '0');
+      const repId      = mpd.querySelector('Representation')?.getAttribute('id') || '';
+
+      // Derive real segment count from mediaPresentationDuration + segment duration
+      let count = 50; // safe fallback for live/unknown
+      const durAttr = mpd.getAttribute('mediaPresentationDuration');
+      if (durAttr && segDur > 0 && timescale > 0) {
+        const totalSec = parseMpdDuration(durAttr);
+        count = Math.ceil((totalSec * timescale) / segDur);
       }
+
+      const mapUrl = initAttr
+        ? resolveUrl(resolveDashTemplate(initAttr, { RepresentationID: repId }), baseUrl)
+        : null;
+
+      const segments = mediaAttr
+        ? Array.from({ length: count }, (_, i) =>
+            resolveUrl(resolveDashTemplate(mediaAttr, { RepresentationID: repId, Number: startNum + i }), baseUrl))
+        : [];
+
+      logger.info(`parseDashSegments (SegmentTemplate): ${segments.length} segments, init=${!!mapUrl}`);
+      return { segments, encryption: null, mapUrl };
     }
-    const res = { segments, encryption: null, mapUrl: null };
-    logger.info(`parseDashSegments result: ${res.segments.length} segments found.`);
-    return res;
+
+    // --- SegmentList (explicit <SegmentURL> elements) ---
+    const segList = mpd.querySelector('SegmentList');
+    if (segList) {
+      const initEl = segList.querySelector('Initialization');
+      const mapUrl = initEl
+        ? resolveUrl(initEl.getAttribute('sourceURL') || '', baseUrl)
+        : null;
+
+      const segments = Array.from(segList.querySelectorAll('SegmentURL'))
+        .map(el => resolveUrl(el.getAttribute('media') || '', baseUrl))
+        .filter(Boolean);
+
+      logger.info(`parseDashSegments (SegmentList): ${segments.length} segments, init=${!!mapUrl}`);
+      return { segments, encryption: null, mapUrl };
+    }
+
+    logger.warn('parseDashSegments: no SegmentTemplate or SegmentList found in MPD');
+    return { segments: [], encryption: null, mapUrl: null };
   } catch (e) {
     logger.error('Failed to parse DASH segments', e);
     return { segments: [], encryption: null, mapUrl: null };
   }
+}
+
+/** Parse ISO 8601 duration (e.g. PT1H2M30.5S) → seconds */
+function parseMpdDuration(iso) {
+  const h = parseFloat(iso.match(/(\d+)H/i)?.[1] || 0);
+  const m = parseFloat(iso.match(/(\d+)M(?!P)/i)?.[1] || 0);
+  const s = parseFloat(iso.match(/([\d.]+)S/i)?.[1] || 0);
+  return h * 3600 + m * 60 + s;
+}
+
+/** Expand DASH template identifiers: $RepresentationID$, $Number$, $Number%05d$ */
+function resolveDashTemplate(template, vars) {
+  return template
+    .replace(/\$RepresentationID\$/g, vars.RepresentationID ?? '')
+    .replace(/\$Number(%0(\d+)d)?\$/g, (_, _fmt, width) => {
+      const n = String(vars.Number ?? 0);
+      return width ? n.padStart(parseInt(width), '0') : n;
+    });
+}
+
+/** Resolve a possibly-relative URL against a base */
+function resolveUrl(url, base) {
+  if (!url) return '';
+  return url.startsWith('http') ? url : base + url;
 }
