@@ -3,6 +3,7 @@
  */
 import { logger } from '../common/logger.js';
 
+
 export const MEDIA_SIGNATURES = [
   '.m3u8', '.mpd', '.mp4', '.webm', 'googlevideo.com', 'videoplayback',
   'chunklist', 'mime=video', 'mime=audio', 'mime_type=video', 'mime_type=audio',
@@ -50,11 +51,12 @@ export function isNoiseFragment(url) {
 
   const fragmentSigns = [
     'seg-', 'fragment-', 'part-', '/ts/', '.ts', '.m4f', 'chunk-',
-    'range=', 'bytes=', 'index=', '/sq/', '/shub/', 'webmask'
+    'index=', 'webmask'
   ];
 
   if (urlLower.includes('googlevideo.com') || urlLower.includes('bilivideo.com')) {
-    if (urlLower.includes('range=') || urlLower.includes('clen=') || urlLower.includes('live=1')) return true;
+    // For these platforms, only block if explicitly known to be a small fragment or live stream metadata
+    if (urlLower.includes('live=1') && !urlLower.includes('m3u8')) return true;
   }
 
   if (fragmentSigns.some(sig => urlLower.includes(sig))) {
@@ -92,7 +94,7 @@ export function extractGroupTag(url) {
     const idPart = parts.find(p => p.length > 20 && /^[a-f0-9]+$/i.test(p));
     if (idPart) return `bili-${idPart.substring(0, 16)}`;
   }
-  const sessMatch = url.match(/[&?](session_id|sid|task_id|mt|_nc_gid)=([^&]+)/i);
+  const sessMatch = url.match(/[&?](session_id|sid|task_id|mt|_nc_gid|logid|l)=([^&]+)/i);
   if (sessMatch) return sessMatch[2];
 
   // Fallback: Facebook video_id inside efg param
