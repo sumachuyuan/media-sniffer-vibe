@@ -43,12 +43,26 @@ async function handleMerge(m) {
 
     if (isCancelled) throw new Error('CANCELLED');
     sendProgress(70, progressUrl, t('merging'), itemId);
-    await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-c', 'copy', 'final.mp4']);
+    
+    // Attempt merging with '-c copy'. 
+    // Note: MP4 container might fail for VP9+Opus. If it fails, we try MKV as a robust fallback.
+    let result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-c', 'copy', 'final.mp4']);
+    let finalExt = 'mp4';
+
+    if (result !== 0) {
+      logger.warn('MP4 merge failed, attempting MKV fallback for codec compatibility...');
+      result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-c', 'copy', 'final.mkv']);
+      finalExt = 'mkv';
+    }
+    
+    if (result !== 0) {
+      throw new Error('FFMPEG_EXEC_ERROR: Merge failed for both MP4 and MKV containers.');
+    }
 
     if (isCancelled) throw new Error('CANCELLED');
-    const outData = ffmpeg.FS('readFile', 'final.mp4');
-    const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
-    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: outputName, url: progressUrl, itemId }).catch(() => { });
+    const outData = ffmpeg.FS('readFile', `final.${finalExt}`);
+    const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: `video/${finalExt === 'mkv' ? 'x-matroska' : 'mp4'}` }));
+    chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: `${outputName}.${finalExt}`, url: progressUrl, itemId }).catch(() => { });
   } catch (e) {
     if (e.message !== 'CANCELLED') {
       logger.error('Merge FATAL Error', e);
