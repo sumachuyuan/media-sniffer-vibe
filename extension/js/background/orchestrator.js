@@ -2,9 +2,9 @@
  * Sovereign Orchestrator - FFmpeg & Offscreen Management
  */
 import { logger } from '../common/logger.js';
-import { state } from './storage.js';
 
-let pendingMergeRequest = null;
+// Command to dispatch to the offscreen document once it signals ready.
+let pendingOffscreenCommand = null;
 
 export async function updateDnrRulesForFetch(referer, ua, urlFilter = '*', scopeToExtension = false) {
   const ruleId = 1001;
@@ -19,8 +19,8 @@ export async function updateDnrRulesForFetch(referer, ua, urlFilter = '*', scope
   // Optimization: If a specific URL is provided, try to scope the filter to its origin
   if (urlFilter && urlFilter !== '*') {
     try {
-        const u = new URL(urlFilter);
-        condition.urlFilter = `${u.protocol}//${u.host}/*`;
+      const u = new URL(urlFilter);
+      condition.urlFilter = `${u.protocol}//${u.host}/*`;
     } catch (e) { /* keep original filter */ }
   }
 
@@ -56,53 +56,23 @@ export async function createOffscreen() {
   });
 }
 
-export async function handleFfmpegMerge(data) {
-  try {
-    const hasDoc = await chrome.offscreen.hasDocument();
-    if (!hasDoc) {
-      pendingMergeRequest = { ...data, _type: 'MERGE' };
-      await createOffscreen();
-    } else {
-      sendMergeCommandToOffscreen(data);
-    }
-  } catch (e) {
-    logger.error('FFmpeg merge handling failed', e);
+// Build the ready-to-send offscreen command from a merge request payload.
+function buildMergeCommand(data) {
+  if (data.segments) {
+    return {
+      type: 'FFMPEG_MERGE_SEGMENTS',
+      segments: data.segments,
+      outputName: data.outputName,
+      referer: data.referer,
+      ua: data.ua,
+      manifestUrl: data.manifestUrl,
+      encryption: data.encryption,
+      mapUrl: data.mapUrl,
+      itemId: data.itemId,
+      concurrency: data.concurrency,
+    };
   }
-}
-
-export async function handleProxyDownload(data) {
-  try {
-    const hasDoc = await chrome.offscreen.hasDocument();
-    if (!hasDoc) {
-      pendingMergeRequest = { ...data, _type: 'PROXY' };
-      await createOffscreen();
-    } else {
-      chrome.runtime.sendMessage({ 
-        type: 'START_PROXY_DOWNLOAD', 
-        url: data.url, 
-        outputName: data.outputName, 
-        itemId: data.itemId 
-      }).catch(err => logger.error('Proxy Command failed', err));
-    }
-  } catch (e) {
-    logger.error('Proxy download handling failed', e);
-  }
-}
-
-export function sendMergeCommandToOffscreen(data) {
-  if (!data) return;
-  const msg = data.segments ? {
-    type: 'FFMPEG_MERGE_SEGMENTS',
-    segments: data.segments,
-    outputName: data.outputName,
-    referer: data.referer,
-    ua: data.ua,
-    manifestUrl: data.manifestUrl,
-    encryption: data.encryption,
-    mapUrl: data.mapUrl,
-    itemId: data.itemId,
-    concurrency: data.concurrency
-  } : {
+  return {
     type: 'FFMPEG_MERGE',
     videoUrl: data.videoUrl,
     audioUrl: data.audioUrl,
@@ -113,23 +83,38 @@ export function sendMergeCommandToOffscreen(data) {
     encryption: data.encryption,
     mapUrl: data.mapUrl,
     itemId: data.itemId,
-    concurrency: data.concurrency
+    concurrency: data.concurrency,
   };
-  chrome.runtime.sendMessage(msg).catch(err => logger.error('Command to Offscreen failed', err));
+}
+
+async function dispatchToOffscreen(command) {
+  try {
+    if (await chrome.offscreen.hasDocument()) {
+      chrome.runtime.sendMessage(command).catch(err => logger.error('Command to Offscreen failed', err));
+    } else {
+      pendingOffscreenCommand = command;
+      await createOffscreen();
+    }
+  } catch (e) {
+    logger.error('dispatchToOffscreen failed', e);
+  }
+}
+
+export function handleFfmpegMerge(data) {
+  return dispatchToOffscreen(buildMergeCommand(data));
+}
+
+export function handleProxyDownload(data) {
+  return dispatchToOffscreen({
+    type: 'START_PROXY_DOWNLOAD',
+    url: data.url,
+    outputName: data.outputName,
+    itemId: data.itemId,
+  });
 }
 
 export function handleOffscreenReady() {
-  if (pendingMergeRequest) {
-    if (pendingMergeRequest._type === 'PROXY') {
-      chrome.runtime.sendMessage({ 
-        type: 'START_PROXY_DOWNLOAD', 
-        url: pendingMergeRequest.url, 
-        outputName: pendingMergeRequest.outputName, 
-        itemId: pendingMergeRequest.itemId 
-      }).catch(() => {});
-    } else {
-      sendMergeCommandToOffscreen(pendingMergeRequest);
-    }
-    pendingMergeRequest = null;
-  }
+  if (!pendingOffscreenCommand) return;
+  chrome.runtime.sendMessage(pendingOffscreenCommand).catch(() => {});
+  pendingOffscreenCommand = null;
 }
