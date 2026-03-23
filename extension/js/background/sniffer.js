@@ -116,7 +116,8 @@ export function detectMediaType(url) {
   const urlLower = url.toLowerCase();
   
   // 1. Direct Keywords (highest priority)
-  if (urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('_audio') || urlLower.includes('/audio/') || urlLower.includes('/music/')) return 'audio';
+  if (urlLower.includes('media-audio') || urlLower.includes('v-ams') || urlLower.includes('mime=audio') || urlLower.includes('type=audio') || urlLower.includes('_audio') || urlLower.includes('/audio/') || urlLower.includes('/music/')) return 'audio';
+  if (urlLower.includes('media-video') || urlLower.includes('v-video') || urlLower.includes('mime=video') || urlLower.includes('type=video') || urlLower.includes('_video') || urlLower.includes('/video/')) return 'video';
   // 2. Platform Specific: YouTube itags
   if (urlLower.includes('googlevideo.com')) {
     const itagMatch = url.match(/[&?]itag=(\d+)/);
