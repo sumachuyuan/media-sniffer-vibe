@@ -372,7 +372,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
     }
     if (type === 'RECORD_STOPPED') {
-      closeRecordOffscreen();
+      // Await full offscreen teardown before opening the FFmpeg offscreen for remux —
+      // Chrome only allows one offscreen document at a time.
+      closeRecordOffscreen().then(() => {
+        if (request.filename) {
+          state.globalMergeStatus = {
+            isMerging: true,
+            itemId: null,
+            url: request.filename,
+            title: `转封装: ${request.filename}`,
+            progress: 0,
+            stage: '准备 MP4 转封装...',
+          };
+          handleFfmpegRemux({ outputName: request.filename });
+        }
+      });
     }
     sendResponse({ ok: true });
   }

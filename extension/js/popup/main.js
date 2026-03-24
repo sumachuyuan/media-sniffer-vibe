@@ -200,32 +200,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       stopBtn.style.background = 'rgba(255,60,60,0.08)';
       dotEl.style.background = '#ff5252';
       dotEl.style.boxShadow = '0 0 6px #ff5252';
-      // Hide remux button from any previous session
-      const remuxWrap = document.getElementById('record-remux-wrap');
-      if (remuxWrap) remuxWrap.style.display = 'none';
-      const remuxBtn = document.getElementById('record-remux-btn');
-      if (remuxBtn) { remuxBtn.disabled = false; remuxBtn.textContent = '⬇ 转为 MP4'; }
       statsEl.style.display = 'block';
       statsEl.innerHTML =
         `录制文件: <b style="color:#aaa">${fileHandle.name}</b>` +
         `&nbsp;&nbsp;<span style="color:#555">${quality}</span>` +
         `&nbsp; 等待编码器...`;
     };
-
-    // Remux button: convert recorded .webm to .mp4 via FFmpeg
-    const remuxBtn = document.getElementById('record-remux-btn');
-    if (remuxBtn) {
-      remuxBtn.onclick = () => {
-        if (!state.recordFileHandle || !state.recordFilename) return;
-        remuxBtn.disabled = true;
-        remuxBtn.textContent = '⏳ 转码中...';
-        // fileHandle is already in IndexedDB from the recording session; no need to pass it.
-        chrome.runtime.sendMessage({
-          type: 'START_WEBM_REMUX',
-          outputName: state.recordFilename,
-        });
-      };
-    }
 
     stopBtn.onclick = () => {
       chrome.runtime.sendMessage({ type: 'STOP_RECORD_TEST' });
@@ -579,16 +559,14 @@ function handleRuntimeMessages(m) {
       const startBtn   = document.getElementById('record-start-btn');
       const qualityEl  = document.getElementById('record-quality');
       const dotEl      = document.getElementById('record-indicator');
-      const remuxWrap  = document.getElementById('record-remux-wrap');
       if (statsEl) statsEl.innerHTML +=
         `<br><span style="color:#29b6f6">文件已写入: <b>${m.filename || '—'}</b></span>` +
-        `<br><span style="color:#ff5252">已停止 — 共传输 <b>${m.totalFrames}</b> 帧给编码器</span>`;
+        `<br><span style="color:#ff5252">已停止 — 共传输 <b>${m.totalFrames}</b> 帧给编码器</span>` +
+        `<br><span style="color:#ffa726">⏳ 正在自动转封装为 MP4...</span>`;
       if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
       if (dotEl)    { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
-      // Store filename so remux button can use it; show button if fileHandle was captured
       if (m.filename) state.recordFilename = m.filename;
-      if (remuxWrap && state.recordFileHandle) remuxWrap.style.display = 'block';
       return;
     }
     if (m.type === 'RECORD_ERROR') {
@@ -626,21 +604,10 @@ function handleRuntimeMessages(m) {
     } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
         const isProxy = m.isProxy;
         const isRemux = m.isRemux;
-        const remuxBtn = document.getElementById('record-remux-btn');
         if (m.type === 'FFMPEG_COMPLETE') {
-            if (isRemux) {
-              if (remuxBtn) { remuxBtn.textContent = '✓ MP4 已保存'; remuxBtn.disabled = true; }
-              ui.showToast('MP4 转封装完成，文件已保存');
-            } else {
-              ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
-            }
+            ui.showToast(isRemux ? 'MP4 转封装完成，文件已保存' : t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
         } else {
-            if (isRemux) {
-              if (remuxBtn) { remuxBtn.disabled = false; remuxBtn.textContent = '⬇ 转为 MP4'; }
-              ui.showToast(`MP4 转封装失败: ${m.error}`, 'error');
-            } else {
-              ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
-            }
+            ui.showToast(isRemux ? `MP4 转封装失败: ${m.error}` : t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
         }
         resetUI();
         if (!isRemux) setTimeout(renderUrls, 2500);
