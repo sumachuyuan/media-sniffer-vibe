@@ -279,5 +279,14 @@
         "content": "$1"
       }
     }
+  },
+  "recordWaitingWrite": {
+    "message": "⏳ Waiting for data write..."
+  },
+  "recordDataReady": {
+    "message": "✅ Data ready, please choose export format"
+  },
+  "ffmpegBusy": {
+    "message": "System busy, please wait for other tasks to complete"
   }
 }

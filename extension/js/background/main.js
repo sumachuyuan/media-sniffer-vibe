@@ -11,7 +11,7 @@ import { PLATFORM_RULES } from './platforms.js';
 import { parseM3U8, parseMPD, parseHlsSegments, parseDashSegments } from './parser.js';
 import {
   handleFfmpegMerge, handleProxyDownload, handleFfmpegRemux, handleAudioExtract,
-  handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch,
+  handleFfmpegDone, handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch,
   dispatchToRecordOffscreen, handleRecordOffscreenReady, closeRecordOffscreen,
   getIsRecordActive,
 } from './orchestrator.js';
@@ -377,10 +377,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (type === 'RECORD_STATS' || type === 'RECORD_STOPPED' || type === 'RECORD_ERROR' || type === 'RECORD_HW_CHECK') {
     chrome.runtime.sendMessage(request).catch(() => {});
 
-    if (type === 'RECORD_STOPPED' || type === 'RECORD_ERROR') {
-      // Clear persisted recording state IMMEDIATELY so popup does not show
-      // stale reconnect UI on next open. Must not wait for any async chain.
-      chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
+    if (type === 'RECORD_STOPPED') {
+      chrome.storage.local.set({
+        recordingState: {
+          isRecording: false,
+          isReady: true,
+          filename: request.filename,
+          isAudioOnly: !!request.isAudioOnly,
+          stoppedAt: Date.now()
+        }
+      }).catch(() => {});
+    }
+    if (type === 'RECORD_ERROR') {
+      chrome.storage.local.set({ recordingState: { isRecording: false, isReady: false } }).catch(() => {});
     }
 
     // Do NOT close the record offscreen here. record/offscreen.js is still
@@ -395,7 +404,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // in IDB. Close the record offscreen, then forward to popup so it can enable
   // the export buttons. The user then chooses to save video or extract audio.
   if (type === 'RECORD_BLOB_READY') {
-    logger.info('[Signal] Received BLOB_READY, triggering remux...');
+    logger.info('[Signal] Received BLOB_READY, storage confirmed.');
     closeRecordOffscreen().then(() => {
       chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename: request.filename }).catch(() => {});
     });
@@ -442,6 +451,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (type === 'FFMPEG_COMPLETE' || type === 'FFMPEG_ERROR') {
     state.globalMergeStatus.isMerging = false;
+    handleFfmpegDone();
     chrome.action.setBadgeText({ text: '' }).catch(() => { });
     clearDnrRules().catch(logger.error);
     chrome.runtime.sendMessage(request).catch(() => { });

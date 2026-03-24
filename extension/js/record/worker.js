@@ -158,8 +158,9 @@ async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAu
     try {
       writable = await fileHandle.createWritable();
       muxer = new VibeMuxer(writable, {
-        width: 1, height: 1, // minimal placeholder — audio-only WebM header
+        width: 1, height: 1,
         codec: CODEC_H264_SW,
+        isAudioOnly: true, // Phase 8: signal audio-only tracks to muxer
         ...(hasAudio ? { sampleRate, channels } : {}),
       });
     } catch (err) {

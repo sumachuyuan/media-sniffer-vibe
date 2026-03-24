@@ -6,6 +6,11 @@ import { logger } from '../common/logger.js';
 // Command to dispatch to the FFmpeg offscreen document once it signals ready.
 let pendingOffscreenCommand = null;
 
+// Tracks which type of offscreen is currently open so dispatchToOffscreen
+// can detect a stale record.html before sending FFmpeg commands.
+// 'ffmpeg' | 'record' | null
+let _activeOffscreenType = null;
+
 // ---------------------------------------------------------------------------
 // Record offscreen state
 // Tracks whether the persistent recording offscreen (record.html) is active.
@@ -112,6 +117,20 @@ async function dispatchToOffscreen(command) {
     return;
   }
 
+  if (_isFfmpegBusy) {
+    logger.warn(`Cannot dispatch ${command.type}: FFmpeg is busy`);
+    chrome.runtime.sendMessage({
+      type: 'FFMPEG_ERROR',
+      error: chrome.i18n.getMessage('ffmpegBusy'),
+      isRemux: command.type === 'WEBM_REMUX',
+      isAudioExtract: command.type === 'AUDIO_EXTRACT',
+    }).catch(() => {});
+    return;
+  }
+
+  // Lock FFmpeg resource before proceeding
+  _isFfmpegBusy = true;
+
   try {
     if (await chrome.offscreen.hasDocument()) {
       if (_activeOffscreenType !== 'ffmpeg') {
@@ -148,6 +167,11 @@ export function handleProxyDownload(data) {
   });
 }
 
+/** Called by background/main.js when FFMPEG_COMPLETE or FFMPEG_ERROR is received. */
+export function handleFfmpegDone() {
+  _isFfmpegBusy = false;
+}
+
 /**
  * Remux a recorded .webm file to .mp4 via FFmpeg (container-copy, no re-encode).
  * fileHandle must be the FileSystemFileHandle from the recording session.
@@ -173,10 +197,9 @@ export function handleOffscreenReady() {
   pendingOffscreenCommand = null;
 }
 
-// Tracks which type of offscreen is currently open so dispatchToOffscreen
-// can detect a stale record.html before sending FFmpeg commands.
-// 'ffmpeg' | 'record' | null
-let _activeOffscreenType = null;
+// Tracks whether a regular FFmpeg job (HLS merge / proxy download) is running.
+// Used to block WEBM_REMUX and AUDIO_EXTRACT when FFmpeg is already busy.
+let _isFfmpegBusy = false;
 
 // ---------------------------------------------------------------------------
 // Record Offscreen Management

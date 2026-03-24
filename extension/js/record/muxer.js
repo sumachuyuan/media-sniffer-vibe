@@ -155,7 +155,29 @@
     ));
   }
 
-  function buildTracks(codec, width, height, codecPrivate, audioOpts) {
+  function buildTracks(codec, width, height, codecPrivate, audioOpts, isAudioOnly) {
+    // -----------------------------------------------------------------------
+    // Phase 8: Audio-only track configuration.
+    // In this mode, we emit a single A_OPUS track as Track 1.
+    // -----------------------------------------------------------------------
+    if (isAudioOnly && audioOpts) {
+      const opusHead = buildOpusHead(audioOpts.sampleRate, audioOpts.channels);
+      const audioBox = el(ID.Audio, concat(
+        el(ID.SamplingFrequency, float64(audioOpts.sampleRate)),
+        el(ID.Channels,          new Uint8Array([audioOpts.channels])),
+      ));
+      const audioTrackBody = concat(
+        el(ID.TrackNumber,  new Uint8Array([1])),
+        el(ID.TrackUID,     randomUID()),
+        el(ID.TrackType,    new Uint8Array([2])), // 2 = audio
+        el(ID.CodecID,      str('A_OPUS')),
+        el(ID.CodecPrivate, opusHead),
+        audioBox,
+      );
+      return el(ID.Tracks, el(ID.TrackEntry, audioTrackBody));
+    }
+
+    // Standard video + optional audio configuration
     const codecIdStr = codec.startsWith('avc') ? 'V_MPEG4/ISO/AVC' : 'V_VP9';
 
     const videoBox = el(ID.Video, concat(
@@ -298,12 +320,13 @@
      * @param {FileSystemWritableFileStream} writable
      * @param {{ width: number, height: number, codec: string, sampleRate?: number, channels?: number }} options
      */
-    constructor(writable, { width, height, codec, sampleRate, channels }) {
-      this._writable   = writable;
-      this._width      = width;
-      this._height     = height;
-      this._codec      = codec;
-      this._audioOpts  = (sampleRate && channels) ? { sampleRate, channels } : null;
+    constructor(writable, { width, height, codec, sampleRate, channels, isAudioOnly = false }) {
+      this._writable      = writable;
+      this._width         = width;
+      this._height        = height;
+      this._codec         = codec;
+      this._audioOpts     = (sampleRate && channels) ? { sampleRate, channels } : null;
+      this._isAudioOnly   = isAudioOnly;
 
       this._headerWritten   = false;
       this._pendingChunks   = [];   // video chunks buffered before first keyframe
@@ -357,18 +380,52 @@
      *   Normalised timestamp in µs (chunk.timestamp − firstTimestamp).
      */
     async addAudioChunk(chunk, overrideTimestampUs) {
-      // Drop audio that arrives before the header or first cluster — avoids timing issues
-      if (!this._headerWritten || this._clusterTimeMs < 0) return;
-      await this._write(buildAudioSimpleBlock(chunk, this._clusterTimeMs, overrideTimestampUs));
+      // -----------------------------------------------------------------------
+      // Phase 8: Header handling for audio-only mode.
+      // If we are in audio-only mode, the header is not written via addChunk
+      // (as there is no video). We must trigger it on the first audio packet.
+      // -----------------------------------------------------------------------
+      if (!this._headerWritten) {
+        if (!this._isAudioOnly) return; // Standard mode waits for video keyframe
+
+        await this._writeHeader(null);
+        this._headerWritten = true;
+      }
+
+      const chunkTimeMs = overrideTimestampUs !== undefined
+        ? Math.round(overrideTimestampUs / 1000)
+        : Math.round(chunk.timestamp / 1000);
+
+      // Open a cluster if needed (always open on first packet)
+      if (this._clusterTimeMs < 0 || (chunkTimeMs - this._clusterTimeMs) >= this._CLUSTER_DURATION) {
+        this._clusterTimeMs = chunkTimeMs;
+        await this._write(concat(
+          elOpen(ID.Cluster),
+          el(ID.Timestamp, uint(chunkTimeMs, 4)),
+        ));
+      }
+
+      // In audio-only mode, track is 1; in standard mode, track is 2.
+      const trackId = this._isAudioOnly ? 1 : 2;
+      const blockHeader = concat(
+        new Uint8Array([0x80 | trackId]),
+        uint(Math.min(32767, Math.max(0, chunkTimeMs - this._clusterTimeMs)), 2),
+        new Uint8Array([0x00]),
+      );
+
+      const frameBytes = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(frameBytes);
+
+      await this._write(el(ID.SimpleBlock, concat(blockHeader, frameBytes)));
     }
 
     /** Write all static sections: EBML header + Segment (unknown size) + SegmentInfo + Tracks. */
     async _writeHeader(codecPrivate) {
       await this._write(concat(
         buildEBMLHeader(),
-        elOpen(ID.Segment),          // Segment with unknown size — crash-safe
+        elOpen(ID.Segment),
         buildSegmentInfo(),
-        buildTracks(this._codec, this._width, this._height, codecPrivate, this._audioOpts),
+        buildTracks(this._codec, this._width, this._height, codecPrivate, this._audioOpts, this._isAudioOnly),
       ));
     }
 
@@ -405,6 +462,12 @@
 
     /** Close the WritableFileStream. Normal exit; file is complete and seekable. */
     async finalize() {
+      if (!this._headerWritten && this._isAudioOnly) {
+        // Phase 8: Ensure header is written even for extremely short audio-only recordings
+        // (where stop() was called before the first audio packet was encoded).
+        await this._writeHeader(null);
+        this._headerWritten = true;
+      }
       await this._writable.close();
     }
   }

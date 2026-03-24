@@ -279,5 +279,14 @@
         "content": "$1"
       }
     }
+  },
+  "recordWaitingWrite": {
+    "message": "⏳ 等待数据写入完成..."
+  },
+  "recordDataReady": {
+    "message": "✅ 数据已就绪，请选择导出格式"
+  },
+  "ffmpegBusy": {
+    "message": "系统忙，请等待其他下载任务完成"
   }
 }

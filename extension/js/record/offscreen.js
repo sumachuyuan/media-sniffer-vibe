@@ -82,6 +82,22 @@ function _retrieveFileHandle() {
   });
 }
 
+/** Delete any leftover remux bytes from a previous session before starting a new recording. */
+function _clearRemuxBlob() {
+  return new Promise((resolve) => {
+    const req = indexedDB.open(_IDB.name, 1);
+    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      const tx = db.transaction(_IDB.store, 'readwrite');
+      tx.objectStore(_IDB.store).delete(_IDB_REMUX_KEY);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror   = () => { db.close(); resolve(); };
+    };
+    req.onerror = () => resolve();
+  });
+}
+
 let worker = null;
 let mediaStream = null;
 let videoReader = null;
@@ -100,6 +116,8 @@ let wakeLock = null;
  * @param {boolean} isAudioOnly Phase 8: capture audio track only (no video encoding).
  */
 async function startTest({ streamId, quality, isAudioOnly = false }) {
+  // Phase 8: clear any leftover remux data before starting new recording
+  await _clearRemuxBlob().catch(() => {});
   if (isRunning) { logger.warn(`${COMPONENT} Already running`); return; }
   isRunning = true;
   frameIndex = 0;

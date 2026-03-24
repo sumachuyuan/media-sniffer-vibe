@@ -457,7 +457,6 @@ async function handleAudioExtract(m) {
     }).catch(() => {});
   } finally {
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
-    await _clearRemuxBlob().catch(() => {}); // clear after audio export
     isMerging = false;
   }
 }

@@ -47,10 +47,14 @@ let state = {
 let _recordingTimerInterval = null;
 let _prevBitrateReduced = false;
 
+// Phase 8: track which export operation is in progress for button progress display
+let _isRemuxing = false;
+let _isAudioExtracting = false;
+
 function formatElapsed(totalSeconds) {
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = totalSeconds % 60;
+    const s = Math.floor(totalSeconds % 60);
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
@@ -196,6 +200,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.recordFileHandle = fileHandle;
       state.recordFilename = null; // cleared until RECORD_STOPPED
       state.isAudioOnly = isAudioOnly;
+      if (audioOnlyEl) audioOnlyEl.disabled = true;
+
+      // Phase 8.2: Clear any stale "ready" state before starting a new recording
+      chrome.storage.local.set({ recordingState: { isRecording: true, isReady: false } }).catch(() => {});
 
       // Store fileHandle in IndexedDB so the offscreen document can retrieve it
       // without losing its prototype chain through chrome.runtime.sendMessage IPC.
@@ -238,6 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!state.recordFilename) return;
         saveVideoBtn.disabled = true;
         saveVideoBtn.style.opacity = '0.4';
+        _isRemuxing = true;
         chrome.runtime.sendMessage({
           type: 'START_WEBM_REMUX',
           outputName: state.recordFilename,
@@ -249,6 +258,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!state.recordFilename) return;
         extractAudioBtn.disabled = true;
         extractAudioBtn.style.opacity = '0.4';
+        _isAudioExtracting = true;
         chrome.runtime.sendMessage({
           type: 'START_AUDIO_EXTRACT',
           outputName: state.recordFilename,
@@ -272,31 +282,69 @@ document.addEventListener('DOMContentLoaded', async () => {
         const backendActive = statusResp?.isRecordActive ?? false;
         chrome.storage.local.get('recordingState', (result) => {
             const rs = result?.recordingState;
-            if (!rs?.isRecording) return;
+            if (!rs?.isRecording && !rs?.isReady) return;
 
-            if (!backendActive) {
-                // Stale state detected — background has no live recording offscreen.
-                chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
+            if (rs?.isRecording) {
+                if (!backendActive) {
+                    // Stale state detected — background has no live recording offscreen.
+                    chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
+                    return;
+                }
+
+                // Recording is genuinely in progress — restore UI to active state
+                if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
+                if (stopBtn) {
+                    stopBtn.disabled = false;
+                    stopBtn.style.cursor = 'pointer';
+                    stopBtn.style.color = '#ff5252';
+                    stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
+                    stopBtn.style.background = 'rgba(255,60,60,0.08)';
+                }
+                if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
+                if (dotEl) { dotEl.style.background = '#ff5252'; dotEl.style.boxShadow = '0 0 6px #ff5252'; }
+                if (statsEl) {
+                    statsEl.style.display = 'block';
+                    statsEl.innerHTML = `<span style="color:#00e676">${t('recordWaitingStats')}</span>`;
+                }
+                // Start local timer ticking from persisted startTime
+                if (rs.startTime) startRecordingTimer(rs.startTime);
+                if (audioOnlyEl) audioOnlyEl.disabled = true;
                 return;
             }
 
-            // Recording is genuinely in progress — restore UI to active state
-            if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
-            if (stopBtn) {
-                stopBtn.disabled = false;
-                stopBtn.style.cursor = 'pointer';
-                stopBtn.style.color = '#ff5252';
-                stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
-                stopBtn.style.background = 'rgba(255,60,60,0.08)';
+            // Phase 8.2: If not recording, but a result is ready (e.g. popup closed after stop)
+            if (rs?.isReady && rs.filename) {
+                state.recordFilename = rs.filename;
+                state.isAudioOnly = !!rs.isAudioOnly;
+
+                if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+                if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+                if (dotEl) { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
+                
+                if (stopBtn) stopBtn.style.display = 'none';
+                if (saveVideoBtn) {
+                    saveVideoBtn.style.display = state.isAudioOnly ? 'none' : 'inline-block';
+                    saveVideoBtn.disabled = false;
+                    saveVideoBtn.style.opacity = '1';
+                    saveVideoBtn.style.cursor = 'pointer';
+                }
+                if (extractAudioBtn) {
+                    extractAudioBtn.style.display = 'inline-block';
+                    extractAudioBtn.disabled = false;
+                    extractAudioBtn.style.opacity = '1';
+                    extractAudioBtn.style.cursor = 'pointer';
+                }
+                if (audioOnlyEl) {
+                    audioOnlyEl.checked = !!rs.isAudioOnly;
+                    audioOnlyEl.disabled = false; // allow switching for next time
+                }
+                if (statsEl) {
+                    statsEl.style.display = 'block';
+                    const tsMessage = rs.stoppedAt ? `<br><span style="color:#555;font-size:10px;">${new Date(rs.stoppedAt).toLocaleTimeString()}</span>` : '';
+                    statsEl.innerHTML = `<span style="color:#29b6f6">${t('recordFileWritten', [rs.filename])}</span>` +
+                                       `<br><span style="color:#ffa726">${t('recordDataReady')}</span>` + tsMessage;
+                }
             }
-            if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-            if (dotEl) { dotEl.style.background = '#ff5252'; dotEl.style.boxShadow = '0 0 6px #ff5252'; }
-            if (statsEl) {
-                statsEl.style.display = 'block';
-                statsEl.innerHTML = `<span style="color:#ff5252">${t('recordingStateText')}</span>&nbsp;&nbsp;<span style="color:#555">${rs.quality || ''}</span>`;
-            }
-            // Start local timer ticking from persisted startTime
-            if (rs.startTime) startRecordingTimer(rs.startTime);
         });
     });
 
@@ -625,10 +673,9 @@ function handleRuntimeMessages(m) {
       const dotEl           = document.getElementById('record-indicator');
       const saveVideoBtnEl  = document.getElementById('record-save-video-btn');
       const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
-      if (statsEl) statsEl.innerHTML +=
         `<br><span style="color:#29b6f6">${t('recordFileWritten', [m.filename || '—'])}</span>` +
         `<br><span style="color:#ff5252">${t('recordStoppedTotal', [m.totalFrames])}</span>` +
-        `<br><span style="color:#ffa726">⏳ 等待数据写入完成...</span>`;
+        `<br><span style="color:#ffa726">${t('recordWaitingWrite')}</span>`;
       if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
       if (dotEl)    { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
@@ -636,7 +683,7 @@ function handleRuntimeMessages(m) {
       // Phase 8: swap stop button for export buttons (disabled until IDB write completes)
       if (stopBtnEl) stopBtnEl.style.display = 'none';
       if (saveVideoBtnEl) {
-        saveVideoBtnEl.style.display = 'inline-block';
+        saveVideoBtnEl.style.display = state.isAudioOnly ? 'none' : 'inline-block';
         saveVideoBtnEl.disabled = true;
         saveVideoBtnEl.style.opacity = '0.3';
         saveVideoBtnEl.style.cursor = 'not-allowed';
@@ -647,6 +694,7 @@ function handleRuntimeMessages(m) {
         extractAudioBtnEl.style.opacity = '0.3';
         extractAudioBtnEl.style.cursor = 'not-allowed';
       }
+      if (audioOnlyEl) audioOnlyEl.disabled = false;
       return;
     }
     if (m.type === 'RECORD_BLOB_READY') {
@@ -666,7 +714,7 @@ function handleRuntimeMessages(m) {
         extractAudioBtnEl.style.cursor = 'pointer';
       }
       if (statsEl) statsEl.innerHTML +=
-        `<br><span style="color:#ffa726">✅ 数据已就绪，请选择导出格式</span>`;
+        `<br><span style="color:#ffa726">${t('recordDataReady')}</span>`;
       return;
     }
     if (m.type === 'RECORD_ERROR') {
@@ -686,6 +734,7 @@ function handleRuntimeMessages(m) {
       if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
       if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+      if (audioOnlyEl) audioOnlyEl.disabled = false;
       if (dotEl)    { dotEl.style.background = '#f44'; dotEl.style.boxShadow = 'none'; }
       return;
     }
@@ -705,6 +754,14 @@ function handleRuntimeMessages(m) {
             if (bar) bar.style.width = `${m.progress}%`;
             if (stage) stage.textContent = m.stage || t('merging');
             if (pct) pct.textContent = `${Math.round(m.progress)}%`;
+        }
+        // Phase 8: update export button text with live progress percentage
+        if (_isAudioExtracting) {
+            const btn = document.getElementById('record-extract-audio-btn');
+            if (btn) btn.textContent = t('recordExtractAudio') + ' ' + Math.round(m.progress) + '%';
+        } else if (_isRemuxing) {
+            const btn = document.getElementById('record-save-video-btn');
+            if (btn) btn.textContent = t('recordSaveVideo') + ' ' + Math.round(m.progress) + '%';
         }
     } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
         const isProxy = m.isProxy;
@@ -727,14 +784,26 @@ function handleRuntimeMessages(m) {
                 saveVideoBtnEl.disabled = false;
                 saveVideoBtnEl.style.opacity = '1';
                 saveVideoBtnEl.style.cursor = 'pointer';
+                saveVideoBtnEl.textContent = t('recordSaveVideo');
             }
             if (extractAudioBtnEl && extractAudioBtnEl.style.display !== 'none') {
                 extractAudioBtnEl.disabled = false;
                 extractAudioBtnEl.style.opacity = '1';
                 extractAudioBtnEl.style.cursor = 'pointer';
+                extractAudioBtnEl.textContent = t('recordExtractAudio');
             }
+            _isRemuxing = false;
+            _isAudioExtracting = false;
+            
+            // Phase 8.1: Support multiple continuous exports by keeping the record panel visible.
+            // Reset only the temporary merge/export state variables.
+            state.mergingUrl = null;
+            state.mergingProgress = 0;
+            state.mergingStage = '';
+            ui.hideMergeBanner();
+        } else {
+            resetUI();
+            setTimeout(renderUrls, 2500);
         }
-        resetUI();
-        if (!isRemux && !isAudioExtract) setTimeout(renderUrls, 2500);
     }
 }

@@ -579,6 +579,54 @@
       display: flex;
       justify-content: space-between;
     }
+
+    /* Phase 8.3: Toggle Switch */
+    .toggle-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .toggle-input {
+      display: none;
+    }
+    .toggle-slider {
+      position: relative;
+      display: inline-block;
+      width: 24px;
+      height: 14px;
+      background-color: rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      transition: all 0.3s;
+      border: 1px solid rgba(171, 71, 188, 0.3);
+    }
+    .toggle-slider::after {
+      content: '';
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #666;
+      top: 2px;
+      left: 2px;
+      transition: all 0.3s cubic-bezier(0.18, 0.89, 0.35, 1.15);
+    }
+    .toggle-input:checked + .toggle-slider {
+      background-color: rgba(171, 71, 188, 0.2);
+      border-color: #ab47bc;
+    }
+    .toggle-input:checked + .toggle-slider::after {
+      left: 12px;
+      background-color: #ab47bc;
+      box-shadow: 0 0 8px rgba(171, 71, 188, 0.6);
+    }
+    .toggle-input:disabled + .toggle-slider {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    .toggle-wrapper:hover .toggle-slider {
+      border-color: rgba(171, 71, 188, 0.6);
+    }
   </style>
 </head>
 
@@ -633,9 +681,10 @@
         <span id="record-timer" style="display:none; font-family:monospace; color:#ff5252; font-size:9px; font-weight:800; letter-spacing:0.5px; padding:2px 5px; border-radius:3px; background:rgba(255,82,82,0.08);">00:00:00</span>
       </div>
       <div style="display:flex; gap:6px; align-items:center;">
-        <label id="record-audio-only-wrap" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:9px; color:#ab47bc; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">
-          <input type="checkbox" id="record-audio-only" style="width:11px; height:11px; cursor:pointer; accent-color:#ab47bc; margin:0;">
-          <span data-i18n="recordAudioOnly">仅录音</span>
+        <label for="record-audio-only" class="toggle-wrapper" title="Only record audio">
+          <input type="checkbox" id="record-audio-only" class="toggle-input">
+          <span class="toggle-slider"></span>
+          <span data-i18n="recordAudioOnly" style="font-size:9px; color:#ab47bc; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">仅录音</span>
         </label>
         <select id="record-quality" style="background:#111; color:#888; border:1px solid rgba(255,255,255,0.1); border-radius:4px; font-size:9px; font-weight:700; padding:3px 6px; cursor:pointer; letter-spacing:0.3px; outline:none;">
           <option value="UHD" data-i18n="recordQualityUHD">原画</option>
