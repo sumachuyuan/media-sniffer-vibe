@@ -30,6 +30,27 @@ const COMPONENT = '[RecordOffscreen]';
 // passed through chrome.runtime.sendMessage across IPC boundaries.
 // ---------------------------------------------------------------------------
 const _IDB = { name: 'vibeRecordDB', store: 'handles', key: 'currentFileHandle' };
+const _IDB_REMUX_KEY = 'remuxInputBlob';
+
+/**
+ * Store the recorded File/Blob in IDB so the FFmpeg offscreen can read it
+ * without needing FileSystemFileHandle permission in a new document context.
+ */
+function _storeRemuxBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_IDB.name, 1);
+    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      const tx = db.transaction(_IDB.store, 'readwrite');
+      const put = tx.objectStore(_IDB.store).put(blob, _IDB_REMUX_KEY);
+      put.onsuccess = () => { db.close(); resolve(); };
+      put.onerror = () => { db.close(); reject(put.error); };
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
 function _retrieveFileHandle() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(_IDB.name, 1);
@@ -98,15 +119,28 @@ async function startTest({ streamId, quality }) {
       chrome.runtime.sendMessage({ type: 'RECORD_HW_CHECK', mode: msg.mode, codec: msg.codec }).catch(() => { });
 
     } else if (msg.type === 'RECORD_WRITE_COMPLETE') {
-      // Worker has flushed encoder + muxer + closed the file. Safe to clean up.
+      // Worker has flushed encoder + muxer + closed the writable stream.
+      // Read the file back as a Blob and persist it in IDB BEFORE sending
+      // RECORD_STOPPED. This gives the FFmpeg offscreen a permission-free way
+      // to access the data — fileHandle.getFile() in a new document context
+      // would throw SecurityError (user activation required).
       logger.info(`${COMPONENT} File write complete: ${msg.filename}`);
-      chrome.runtime.sendMessage({
-        type: 'RECORD_STOPPED',
-        totalFrames: frameIndex,
-        filename: msg.filename,
-      }).catch(() => { });
-      // Terminate Worker now that it has finished all I/O
-      setTimeout(() => { if (worker) { worker.terminate(); worker = null; } }, 100);
+      const filename = msg.filename;
+      (async () => {
+        try {
+          const file = await fileHandle.getFile();
+          await _storeRemuxBlob(file);
+          logger.info(`${COMPONENT} Remux blob stored in IDB (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+        } catch (err) {
+          logger.warn(`${COMPONENT} Failed to store remux blob: ${err.message}`);
+        }
+        chrome.runtime.sendMessage({
+          type: 'RECORD_STOPPED',
+          totalFrames: frameIndex,
+          filename,
+        }).catch(() => {});
+        setTimeout(() => { if (worker) { worker.terminate(); worker = null; } }, 100);
+      })();
 
     } else if (msg.type === 'ENCODE_ERROR') {
       logger.error(`${COMPONENT} ${msg.error}`);

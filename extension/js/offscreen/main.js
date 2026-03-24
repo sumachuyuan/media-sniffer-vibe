@@ -9,6 +9,8 @@ import { decryptBuffer } from './crypto.js';
 // IndexedDB helper — retrieves the FileSystemFileHandle stored by the popup.
 // ---------------------------------------------------------------------------
 const _IDB = { name: 'vibeRecordDB', store: 'handles', key: 'currentFileHandle' };
+const _IDB_REMUX_KEY = 'remuxInputBlob';
+
 function _retrieveFileHandle() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(_IDB.name, 1);
@@ -21,6 +23,37 @@ function _retrieveFileHandle() {
       get.onerror = () => { db.close(); reject(get.error); };
     };
     req.onerror = () => reject(req.error);
+  });
+}
+
+/** Retrieve the Blob saved by record/offscreen.js after recording completes. */
+function _retrieveRemuxBlob() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_IDB.name, 1);
+    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      const tx = db.transaction(_IDB.store, 'readonly');
+      const get = tx.objectStore(_IDB.store).get(_IDB_REMUX_KEY);
+      get.onsuccess = () => { db.close(); resolve(get.result || null); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** Delete the remux Blob from IDB after use to free storage space. */
+function _clearRemuxBlob() {
+  return new Promise((resolve) => {
+    const req = indexedDB.open(_IDB.name, 1);
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      const tx = db.transaction(_IDB.store, 'readwrite');
+      tx.objectStore(_IDB.store).delete(_IDB_REMUX_KEY);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); resolve(); };
+    };
+    req.onerror = () => resolve();
   });
 }
 
@@ -300,39 +333,21 @@ async function handleWebMRemux(m) {
   isMerging = true;
   const { outputName } = m;
 
-  // Retrieve fileHandle from IndexedDB (stored by popup, not passable over IPC).
-  let fileHandle;
-  try {
-    fileHandle = await _retrieveFileHandle();
-    if (!fileHandle || typeof fileHandle.createWritable !== 'function') throw new Error('IDB fileHandle invalid');
-  } catch (err) {
-    logger.error('[Remux] fileHandle retrieval failed', err);
-    chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `FileHandle 取得失敗: ${err.message}`, url: outputName, isRemux: true }).catch(() => {});
-    isMerging = false;
-    return;
-  }
-
   let ffmpeg = null;
   try {
     sendProgress(5, outputName, '读取录制文件...');
 
-    // Ensure read permission is still granted in this new offscreen context.
-    // After the record offscreen closes and a new FFmpeg offscreen opens, the
-    // FileSystemFileHandle retrieved from IDB may need an explicit permission check.
-    if (typeof fileHandle.queryPermission === 'function') {
-      const perm = await fileHandle.queryPermission({ mode: 'read' });
-      if (perm !== 'granted') {
-        const req = await fileHandle.requestPermission({ mode: 'read' });
-        if (req !== 'granted') throw new DOMException('Read permission denied for recorded file', 'NotAllowedError');
-      }
-    }
+    // Read the recorded WebM from IDB as a Blob.
+    // record/offscreen.js stores the Blob in IDB (under _IDB_REMUX_KEY) after
+    // the worker closes the file — this avoids FileSystemFileHandle.getFile()
+    // which throws SecurityError in a new document context (user activation required).
+    const blob = await _retrieveRemuxBlob();
+    if (!blob) throw new Error('IDB 中未找到录制 Blob，请重试录制');
 
-    // Read the WebM file back through the FileSystemFileHandle
-    const file = await fileHandle.getFile();
-    const fileSizeMB = (file.size / 1024 / 1024).toFixed(0);
+    const fileSizeMB = (blob.size / 1024 / 1024).toFixed(0);
     logger.info(`[Remux] Input: ${outputName} (${fileSizeMB} MB)`);
 
-    const inputBytes = new Uint8Array(await file.arrayBuffer());
+    const inputBytes = new Uint8Array(await blob.arrayBuffer());
 
     sendProgress(20, outputName, '初始化 FFmpeg...');
     ffmpeg = await initFFmpeg(true);
@@ -374,6 +389,7 @@ async function handleWebMRemux(m) {
     }).catch(() => {});
   } finally {
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
+    await _clearRemuxBlob().catch(() => {}); // free IDB storage
     isMerging = false;
   }
 }
