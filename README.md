@@ -24,10 +24,14 @@
 
 ### 🛠️ 2. 核心功能概览
 
+![Extreme Recording](images/2.png)
+*图：极端录制 (Extreme Recording) 模式下的实时硬件编码统计*
+
+-   **极端录制 (Extreme Recording)**: 🛡️ 支持 4K 原画/1080P/720P 定制录制。物理隔离采集锁，内置时间戳平滑技术，确保长时录制不掉帧、不乱跳。
 -   **原生合并 (Native Merge)**: 利用 `FFmpeg.wasm` 技术，在浏览器内部直接将 HLS/DASH/fMP4 分段流合并为 MP4，**零延迟、无需服务器**。
+-   **智能配对**: 自动识别音视频分离的流媒体（如 YouTube/B站），提供一键“提取并合并”功能。
 -   **高能模式 (High Performance)**: 🚀 按钮开启 3-5 线程并发抓取，下载提速 300%+。
 -   **内存脱水 (Memory Sovereignty)**: 智能回收 `MEMFS` 临时文件，确保任务结束即刻释放系统资源。
--   **主权嗅探**: 自动识别包含 M3U8、MPD、MP4 及音频流在内的多种媒体格式。
 -   **隐私合规**: 权限逻辑已进行“权限脱水”审计，不读取任何无关数据。
 -   **多语言支持**: 支持中/英双语，一键切换。
 
@@ -95,10 +99,14 @@
 
 ### 🛠️ 2. Key Features
 
+![Extreme Recording English](images/2.png)
+*Standard: Real-time hardware encoding stats in Extreme Recording mode*
+
+-   **Extreme Recording**: 🛡️ Support for 4K Original / 1080P / 720P custom recording. Hardened with physical capture lock isolation and timestamp smoothing for jitter-free long-duration sessions.
 -   **Native Merge**: Leverage `FFmpeg.wasm` to merge HLS/DASH/fMP4 segments directly in the browser—**zero latency, no server required**.
+-   **Smart Join**: Automatically detect separate audio/video streams (e.g., YouTube/Bilibili) and provide one-click "Extract & Join."
 -   **High Performance**: 🚀 button enables 3-5 concurrent threads for 300%+ faster downloads.
 -   **Memory Sovereignty**: Proactive `MEMFS` cleanup ensures system resources are released immediately after tasks.
--   **Sovereign Sniffing**: Automatically identifies M3U8, MPD, MP4, and various audio streams.
 -   **Privacy Dehydration**: Audited permission logic ensuring zero data collection.
 -   **Multilingual**: Support for English and Chinese with one-click toggling.
 
@@ -142,9 +150,17 @@ To use the **CMD** mode for high-quality downloads, you need to install `yt-dlp`
 
 ---
 
+## 📸 功能快照 / Gallery
+
+| 智能配对与预览 (Smart Join & Preview) | 资源列表 (Resource List) |
+| :---: | :---: |
+| ![Preview](images/3.png) | ![List](images/4.png) |
+
+---
+
 ## 🔒 Privacy & Legal / 隐私与法律
 
 This tool is for educational and research purposes only. Please respect content copyrights. 
 本工具仅供学习与研究使用。请尊重内容版权。
 
-*2026-03-20 | Media Sniffer Vibe Dev Team*
+*2026-03-25 | Media Sniffer Vibe Dev Team*
