@@ -120,9 +120,58 @@ self.onmessage = async function (e) {
 // ---------------------------------------------------------------------------
 // INIT — probe hardware, configure encoder, open muxer + file
 // ---------------------------------------------------------------------------
-async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAudio, sampleRate: _sr, channels: _ch }) {
+async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAudio, isAudioOnly = false, sampleRate: _sr, channels: _ch }) {
   const sampleRate = _sr || AUDIO_SAMPLE_RATE;
   const channels = _ch || AUDIO_CHANNELS;
+
+  outputName = fileHandle.name;
+  hasAudio = !!_hasAudio;
+
+  // Phase 8: audio-only mode — skip VideoEncoder entirely, only init AudioEncoder + muxer.
+  if (isAudioOnly) {
+    encoderMode = 'audio';
+    activeCodec = 'opus';
+    activeRes = 'audio-only';
+    encodeWidth = 0;
+    encodeHeight = 0;
+
+    if (hasAudio && typeof AudioEncoder !== 'undefined') {
+      try {
+        const audioConfig = { codec: 'opus', sampleRate, numberOfChannels: channels, bitrate: AUDIO_BITRATE };
+        const audioSupport = await AudioEncoder.isConfigSupported(audioConfig);
+        if (audioSupport.supported) {
+          audioEncoder = new AudioEncoder({
+            output: handleEncodedAudio,
+            error: (err) => self.postMessage({ type: 'ENCODE_ERROR', error: `Audio: ${err.message}` }),
+          });
+          audioEncoder.configure(audioConfig);
+        } else {
+          self.postMessage({ type: 'ENCODE_ERROR', error: 'AudioEncoder not supported for audio-only recording' });
+          return;
+        }
+      } catch (err) {
+        self.postMessage({ type: 'ENCODE_ERROR', error: `Audio init failed: ${err.message}` });
+        return;
+      }
+    }
+
+    try {
+      writable = await fileHandle.createWritable();
+      muxer = new VibeMuxer(writable, {
+        width: 1, height: 1, // minimal placeholder — audio-only WebM header
+        codec: CODEC_H264_SW,
+        ...(hasAudio ? { sampleRate, channels } : {}),
+      });
+    } catch (err) {
+      self.postMessage({ type: 'ENCODE_ERROR', error: `Cannot open file for writing: ${err.message}` });
+      return;
+    }
+
+    self.postMessage({ type: 'ENCODER_READY', mode: 'audio', codec: 'opus' });
+    return;
+  }
+
+  // --- Standard video+audio mode ---
   // Determine encode resolution based on quality tier
   const maxRes = QUALITY_MAX[quality] || null;
   if (maxRes && (width > maxRes.width || height > maxRes.height)) {
@@ -165,8 +214,6 @@ async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAu
   encoderMode = chosenLabel;
   activeCodec = chosenConfig.codec;
   activeRes = `${encodeWidth}x${encodeHeight}`;
-  outputName = fileHandle.name;
-  hasAudio = !!_hasAudio;
 
   // Open the video encoder
   encoder = new VideoEncoder({

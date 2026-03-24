@@ -1,58 +1,283 @@
 {
-  "appName": { "message": "Media Sniffer Vibe" },
-  "platformPageUrl": { "message": "Page URL" },
-  "targeting": { "message": "Targeting $RES$P...", "placeholders": { "res": { "content": "$1" } } },
-  "mergeError": { "message": "Merge Error: $ERROR$", "placeholders": { "error": { "content": "$1" } } },
-  "appDesc": { "message": "Sovereign Media Capture Engine" },
-  "clearBtn": { "message": "CLEAR" },
-  "searchPlaceholder": { "message": "Search by title..." },
-  "noMedia": { "message": "No media detected. Start playing a video!" },
-  "scanning": { "message": "SCANNING" },
-  "initializing": { "message": "INITIALIZING" },
-  "fetching": { "message": "FETCHING" },
-  "merging": { "message": "MERGING" },
-  "complete": { "message": "COMPLETE" },
-  "error": { "message": "ERROR" },
-  "cancelMerge": { "message": "CANCEL MERGE" },
-  "video": { "message": "VIDEO" },
-  "audio": { "message": "AUDIO" },
-  "encrypted": { "message": "ENCRYPTED" },
-  "taskLock": { "message": "Another task in progress..." },
-  "copyCmd": { "message": "CMD" },
-  "nativeMerge": { "message": "MERGE & DOWNLOAD" },
-  "companionMerge": { "message": "EXTRACT & JOIN" },
-  "directDownload": { "message": "DIRECT" },
-  "play": { "message": "PLAY" },
-  "close": { "message": "✕" },
-  "url": { "message": "URL" },
-  "companionHeader": { "message": "💎 COMPANION STREAMS DETECTED" },
-  "promoDesc": { "message": "Using the original page URL is recommended for fragmented streams." },
-  "toastCommandCopied": { "message": "Command Copied!" },
-  "toastUrlCopied": { "message": "URL Copied!" },
-  "toastListCleared": { "message": "List cleared" },
-  "toastDownloadStarted": { "message": "Starting Download..." },
+  "appName": {
+    "message": "Media Sniffer Vibe"
+  },
+  "platformPageUrl": {
+    "message": "Page URL"
+  },
+  "targeting": {
+    "message": "Targeting $RES$P...",
+    "placeholders": {
+      "res": {
+        "content": "$1"
+      }
+    }
+  },
+  "mergeError": {
+    "message": "Merge Error: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "appDesc": {
+    "message": "Sovereign Media Capture Engine"
+  },
+  "clearBtn": {
+    "message": "CLEAR"
+  },
+  "searchPlaceholder": {
+    "message": "Search by title..."
+  },
+  "noMedia": {
+    "message": "No media detected. Start playing a video!"
+  },
+  "scanning": {
+    "message": "SCANNING"
+  },
+  "initializing": {
+    "message": "INITIALIZING"
+  },
+  "fetching": {
+    "message": "FETCHING"
+  },
+  "merging": {
+    "message": "MERGING"
+  },
+  "complete": {
+    "message": "COMPLETE"
+  },
+  "error": {
+    "message": "ERROR"
+  },
+  "cancelMerge": {
+    "message": "CANCEL MERGE"
+  },
+  "video": {
+    "message": "VIDEO"
+  },
+  "audio": {
+    "message": "AUDIO"
+  },
+  "encrypted": {
+    "message": "ENCRYPTED"
+  },
+  "taskLock": {
+    "message": "Another task in progress..."
+  },
+  "copyCmd": {
+    "message": "CMD"
+  },
+  "nativeMerge": {
+    "message": "MERGE & DOWNLOAD"
+  },
+  "companionMerge": {
+    "message": "EXTRACT & JOIN"
+  },
+  "directDownload": {
+    "message": "DIRECT"
+  },
+  "play": {
+    "message": "PLAY"
+  },
+  "close": {
+    "message": "✕"
+  },
+  "url": {
+    "message": "URL"
+  },
+  "companionHeader": {
+    "message": "💎 COMPANION STREAMS DETECTED"
+  },
+  "promoDesc": {
+    "message": "Using the original page URL is recommended for fragmented streams."
+  },
+  "toastCommandCopied": {
+    "message": "Command Copied!"
+  },
+  "toastUrlCopied": {
+    "message": "URL Copied!"
+  },
+  "toastListCleared": {
+    "message": "List cleared"
+  },
+  "toastDownloadStarted": {
+    "message": "Starting Download..."
+  },
   "toastMergeComplete": {
     "message": "Merge Complete!"
   },
   "toastDownloadComplete": {
     "message": "Download Complete!"
   },
-  "toastScanFailed": { "message": "Scan failed" },
-  "copyCmdTooltip": { "message": "Copy CLI command for yt-dlp/ffmpeg" },
-  "copyUrlTooltip": { "message": "Copy media URL to clipboard" },
-  "footerNote": { "message": "CMD: CLI command for yt-dlp/ffmpeg" },
-  "captured": { "message": "Captured" },
-  "universal": { "message": "UNIVERSAL" },
-  "mergingInProgress": { "message": "MERGING IN PROGRESS" },
-  "sovereignSandbox": { "message": "Sovereign Sandbox is active..." },
-  "targetPage": { "message": "Target Page" },
-  "sizeWarning": { "message": "Large file (~$SIZE$). Browser merge may be unstable. Use CMD for better performance?", "placeholders": { "size": { "content": "$1" } } },
-  "sizeCritical": { "message": "High-load video (~$SIZE$). Browser merge likely to crash. Use CMD instead?", "placeholders": { "size": { "content": "$1" } } },
-  "confirmNativeMerge": { "message": "Large video (~$SIZE$). Native merge may fail or freeze the browser.\n\nContinue anyway? (CMD is recommended)", "placeholders": { "size": { "content": "$1" } } },
-  "toastHighPerfOn": { "message": "🚀 High Performance: Multi-threaded fetching enabled" },
-  "toastHighPerfOff": { "message": "🛡️ Safe Mode: Sequential fetching for stability" },
-  "perfToggleTooltip": { "message": "Performance Toggle (🚀 Multi-threaded / 🛡️ Sequential)" },
-  "langToggleTooltip": { "message": "Switch Language (🌐 English / Chinese)" },
-  "snapshot": { "message": "Snapshot" },
-  "snapshotTooltip": { "message": "Save current video frame as high-quality PNG" }
+  "toastScanFailed": {
+    "message": "Scan failed"
+  },
+  "copyCmdTooltip": {
+    "message": "Copy CLI command for yt-dlp/ffmpeg"
+  },
+  "copyUrlTooltip": {
+    "message": "Copy media URL to clipboard"
+  },
+  "footerNote": {
+    "message": "CMD: CLI command for yt-dlp/ffmpeg"
+  },
+  "captured": {
+    "message": "Captured"
+  },
+  "universal": {
+    "message": "UNIVERSAL"
+  },
+  "mergingInProgress": {
+    "message": "MERGING IN PROGRESS"
+  },
+  "sovereignSandbox": {
+    "message": "Sovereign Sandbox is active..."
+  },
+  "targetPage": {
+    "message": "Target Page"
+  },
+  "sizeWarning": {
+    "message": "Large file (~$SIZE$). Browser merge may be unstable. Use CMD for better performance?",
+    "placeholders": {
+      "size": {
+        "content": "$1"
+      }
+    }
+  },
+  "sizeCritical": {
+    "message": "High-load video (~$SIZE$). Browser merge likely to crash. Use CMD instead?",
+    "placeholders": {
+      "size": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmNativeMerge": {
+    "message": "Large video (~$SIZE$). Native merge may fail or freeze the browser.\n\nContinue anyway? (CMD is recommended)",
+    "placeholders": {
+      "size": {
+        "content": "$1"
+      }
+    }
+  },
+  "toastHighPerfOn": {
+    "message": "🚀 High Performance: Multi-threaded fetching enabled"
+  },
+  "toastHighPerfOff": {
+    "message": "🛡️ Safe Mode: Sequential fetching for stability"
+  },
+  "perfToggleTooltip": {
+    "message": "Performance Toggle (🚀 Multi-threaded / 🛡️ Sequential)"
+  },
+  "langToggleTooltip": {
+    "message": "Switch Language (🌐 English / Chinese)"
+  },
+  "snapshot": {
+    "message": "Snapshot"
+  },
+  "snapshotTooltip": {
+    "message": "Save current video frame as high-quality PNG"
+  },
+  "recordTabTitle": {
+    "message": "Tab Recording"
+  },
+  "recordQualityUHD": {
+    "message": "UHD"
+  },
+  "recordStart": {
+    "message": "Start"
+  },
+  "recordStop": {
+    "message": "Stop"
+  },
+  "recordMacosNotice": {
+    "message": "⚠ macOS: If no audio, ensure Chrome is authorized in System Preferences > Security & Privacy > Microphone"
+  },
+  "recordFileReady": {
+    "message": "Record file: $FILENAME$",
+    "placeholders": {
+      "filename": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordWaitingEncoder": {
+    "message": "Waiting for encoder..."
+  },
+  "recordingStateText": {
+    "message": "⬤ Recording..."
+  },
+  "recordEncoderReady": {
+    "message": "Encoder Ready"
+  },
+  "recordGpuHw": {
+    "message": "GPU HW"
+  },
+  "recordSoftSw": {
+    "message": "Software Encoding"
+  },
+  "recordFileWritten": {
+    "message": "File written: $FILENAME$",
+    "placeholders": {
+      "filename": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoppedTotal": {
+    "message": "Stopped - Total $COUNT$ frames",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordRemuxing": {
+    "message": "⏳ Automatically remuxing (MP4)..."
+  },
+  "recordErrorTab": {
+    "message": "Error: Could not get current tab"
+  },
+  "recordErrorStreamId": {
+    "message": "Could not get tab stream ID"
+  },
+  "recordIoRecovered": {
+    "message": "I/O recovered, bitrate restored"
+  },
+  "recordRemuxComplete": {
+    "message": "MP4 remux complete, file saved"
+  },
+  "recordRemuxFailed": {
+    "message": "MP4 remux failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordAudioOnly": {
+    "message": "Audio Only"
+  },
+  "recordSaveVideo": {
+    "message": "Save Video"
+  },
+  "recordExtractAudio": {
+    "message": "Extract Audio"
+  },
+  "recordAudioExtracting": {
+    "message": "⏳ Extracting MP3..."
+  },
+  "recordAudioComplete": {
+    "message": "MP3 extracted, file saved"
+  },
+  "recordAudioFailed": {
+    "message": "MP3 extraction failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  }
 }

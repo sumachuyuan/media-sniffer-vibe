@@ -10,7 +10,7 @@ import {
 import { PLATFORM_RULES } from './platforms.js';
 import { parseM3U8, parseMPD, parseHlsSegments, parseDashSegments } from './parser.js';
 import {
-  handleFfmpegMerge, handleProxyDownload, handleFfmpegRemux,
+  handleFfmpegMerge, handleProxyDownload, handleFfmpegRemux, handleAudioExtract,
   handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch,
   dispatchToRecordOffscreen, handleRecordOffscreenReady, closeRecordOffscreen,
   getIsRecordActive,
@@ -341,6 +341,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       type: 'START_RECORD_TEST',
       streamId: request.streamId,
       quality: request.quality,
+      isAudioOnly: request.isAudioOnly || false,
     });
     // Persist recording state so popup can restore UI after being reopened.
     chrome.storage.local.set({
@@ -391,28 +392,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   // record/offscreen.js sends RECORD_BLOB_READY after storing the WebM bytes
-  // in IDB. Only now is it safe to open the FFmpeg offscreen for remux.
+  // in IDB. Close the record offscreen, then forward to popup so it can enable
+  // the export buttons. The user then chooses to save video or extract audio.
   if (type === 'RECORD_BLOB_READY') {
     logger.info('[Signal] Received BLOB_READY, triggering remux...');
-    if (request.filename) {
-      // Await full closure of record.html before opening the FFmpeg offscreen.
-      // Without this, chrome.offscreen.hasDocument() still returns true for
-      // record.html when dispatchToOffscreen runs, causing WEBM_REMUX to be
-      // sent to the wrong document.
-      closeRecordOffscreen().then(() => {
-        state.globalMergeStatus = {
-          isMerging: true,
-          itemId: null,
-          url: request.filename,
-          title: `转封装: ${request.filename}`,
-          progress: 0,
-          stage: '准备 MP4 转封装...',
-        };
-        handleFfmpegRemux({ outputName: request.filename });
-      });
-    }
+    closeRecordOffscreen().then(() => {
+      chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename: request.filename }).catch(() => {});
+    });
     sendResponse({ ok: true });
     return true;
+  }
+
+  if (type === 'START_AUDIO_EXTRACT') {
+    state.globalMergeStatus = {
+      isMerging: true,
+      itemId: null,
+      url: request.outputName,
+      title: `提取音频: ${request.outputName}`,
+      progress: 0,
+      stage: '准备提取 MP3...',
+    };
+    handleAudioExtract(request);
+    sendResponse({ status: 'queued' });
   }
 
   if (type === 'RECORD_BLOB_FAILED') {

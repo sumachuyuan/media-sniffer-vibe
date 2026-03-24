@@ -95,10 +95,11 @@ let wakeLock = null;
 // ---------------------------------------------------------------------------
 
 /**
- * @param {string} streamId  From chrome.tabCapture.getMediaStreamId() via background.
- * @param {string} quality   'UHD' | '1080P' | '720P'
+ * @param {string}  streamId    From chrome.tabCapture.getMediaStreamId() via background.
+ * @param {string}  quality     'UHD' | '1080P' | '720P'
+ * @param {boolean} isAudioOnly Phase 8: capture audio track only (no video encoding).
  */
-async function startTest({ streamId, quality }) {
+async function startTest({ streamId, quality, isAudioOnly = false }) {
   if (isRunning) { logger.warn(`${COMPONENT} Already running`); return; }
   isRunning = true;
   frameIndex = 0;
@@ -200,12 +201,15 @@ async function startTest({ streamId, quality }) {
           chromeMediaSourceId: streamId,
         },
       },
-      video: {
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: streamId,
+      // Phase 8: skip video track when audio-only mode is selected
+      ...(!isAudioOnly && {
+        video: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            chromeMediaSourceId: streamId,
+          },
         },
-      },
+      }),
     };
     mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (err) {
@@ -219,7 +223,8 @@ async function startTest({ streamId, quality }) {
   const videoTrack = mediaStream.getVideoTracks()[0];
   const audioTrack = mediaStream.getAudioTracks()[0];
 
-  if (!videoTrack) {
+  // In standard mode a video track is required; in audio-only mode it is intentionally absent.
+  if (!videoTrack && !isAudioOnly) {
     const err = '捕获流中没有视频轨道';
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
     isRunning = false;
@@ -239,11 +244,15 @@ async function startTest({ streamId, quality }) {
     }
   }
 
-  const s = videoTrack.getSettings();
+  const s = videoTrack ? videoTrack.getSettings() : { width: 0, height: 0 };
   const audioSettings = audioTrack ? audioTrack.getSettings() : {};
   const hasAudio = !!audioTrack;
 
-  logger.info(`${COMPONENT} Video: ${s.width}x${s.height}, Audio: ${audioSettings.sampleRate || 'N/A'}Hz, ${audioSettings.channelCount || 0}ch`);
+  if (isAudioOnly) {
+    logger.info(`${COMPONENT} Audio-only mode: ${audioSettings.sampleRate || 'N/A'}Hz, ${audioSettings.channelCount || 0}ch`);
+  } else {
+    logger.info(`${COMPONENT} Video: ${s.width}x${s.height}, Audio: ${audioSettings.sampleRate || 'N/A'}Hz, ${audioSettings.channelCount || 0}ch`);
+  }
 
   // 4. Send INIT — include detected audio parameters for the encoder
   worker.postMessage({
@@ -253,6 +262,7 @@ async function startTest({ streamId, quality }) {
     fileHandle,
     quality,
     hasAudio,
+    isAudioOnly,
     sampleRate: audioSettings.sampleRate,
     channels: audioSettings.channelCount,
   });
@@ -282,10 +292,12 @@ async function startTest({ streamId, quality }) {
     logger.warn(`${COMPONENT} Wake lock unavailable: ${err.message}`);
   }
 
-  // 7. Start video frame pump
-  const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
-  videoReader = videoProcessor.readable.getReader();
-  pumpVideoFrames();
+  // 7. Start video frame pump (skipped in audio-only mode)
+  if (!isAudioOnly && videoTrack) {
+    const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
+    videoReader = videoProcessor.readable.getReader();
+    pumpVideoFrames();
+  }
 
   // 8. Start audio frame pump (if available)
   if (audioTrack) {
@@ -347,7 +359,7 @@ async function stopTest() {
 // ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'START_RECORD_TEST') {
-    startTest({ streamId: msg.streamId, quality: msg.quality || '1080P' });
+    startTest({ streamId: msg.streamId, quality: msg.quality || '1080P', isAudioOnly: msg.isAudioOnly || false });
     sendResponse({ ok: true });
     return true;
   }

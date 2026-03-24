@@ -160,6 +160,13 @@ export function handleFfmpegRemux(data) {
   });
 }
 
+export function handleAudioExtract(data) {
+  return dispatchToOffscreen({
+    type: 'AUDIO_EXTRACT',
+    outputName: data.outputName,
+  });
+}
+
 export function handleOffscreenReady() {
   if (!pendingOffscreenCommand) return;
   chrome.runtime.sendMessage(pendingOffscreenCommand).catch(() => {});

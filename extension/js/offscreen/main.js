@@ -391,7 +391,73 @@ async function handleWebMRemux(m) {
     }).catch(() => {});
   } finally {
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
-    await _clearRemuxBlob().catch(() => {}); // free IDB storage
+    // IDB bytes are NOT cleared here so the user can still run "Extract Audio"
+    // on the same recording. _clearRemuxBlob() is called in handleAudioExtract
+    // after the audio export, or left for the next recording to overwrite.
+    isMerging = false;
+  }
+}
+
+// --- MP3 Audio Extraction (Phase 8) ---
+// Reads the same WebM bytes from IDB and runs FFmpeg with -vn -ab 192k to
+// produce an MP3. IDB entry is cleared after this operation since audio
+// export is considered the final use of the recorded bytes.
+async function handleAudioExtract(m) {
+  if (isMerging) return;
+  isMerging = true;
+  const { outputName } = m;
+  logger.info('[AudioExtract] handleAudioExtract triggered. Starting IDB fetch...');
+
+  let ffmpeg = null;
+  try {
+    sendProgress(5, outputName, '读取录制文件...');
+    const buffer = await _retrieveRemuxBytes();
+    if (!buffer) throw new Error('IDB 中未找到录制数据，请重试录制');
+
+    logger.info('[AudioExtract] IDB read success, bytes length:', buffer.byteLength);
+    const inputBytes = new Uint8Array(buffer);
+
+    sendProgress(20, outputName, '初始化 FFmpeg...');
+    ffmpeg = await initFFmpeg(true);
+    cleanupFS(ffmpeg);
+
+    ffmpeg.FS('writeFile', 'input.webm', inputBytes);
+
+    sendProgress(45, outputName, '提取音频 (MP3)...');
+    const mp3Name = outputName.replace(/\.[^.]+$/, '.mp3');
+    const result = await runFFmpeg(ffmpeg, [
+      '-y', '-nostdin',
+      '-i', 'input.webm',
+      '-vn',
+      '-ab', '192k',
+      '-f', 'mp3',
+      'output.mp3',
+    ]);
+
+    if (result !== 0) throw new Error('FFmpeg 音频提取失败，请检查录制文件格式');
+
+    sendProgress(90, outputName, '准备下载...');
+    const outData = ffmpeg.FS('readFile', 'output.mp3');
+    const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'audio/mpeg' }));
+    chrome.runtime.sendMessage({
+      type: 'FFMPEG_COMPLETE',
+      blobUrl,
+      filename: mp3Name,
+      url: outputName,
+      isAudioExtract: true,
+    }).catch(() => {});
+  } catch (e) {
+    const detail = `${e.name || 'Error'}: ${e.message || String(e)}`;
+    logger.error(`[AudioExtract] Error — ${detail}`, e);
+    chrome.runtime.sendMessage({
+      type: 'FFMPEG_ERROR',
+      error: `MP3 提取失败: ${detail}`,
+      url: outputName,
+      isAudioExtract: true,
+    }).catch(() => {});
+  } finally {
+    if (ffmpeg) cleanupAfterMerge(ffmpeg);
+    await _clearRemuxBlob().catch(() => {}); // clear after audio export
     isMerging = false;
   }
 }
@@ -401,6 +467,7 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'FFMPEG_MERGE_SEGMENTS') handleMergeSegments(m);
   if (m.type === 'START_PROXY_DOWNLOAD') handleProxyDownload(m);
   if (m.type === 'WEBM_REMUX') handleWebMRemux(m);
+  if (m.type === 'AUDIO_EXTRACT') handleAudioExtract(m);
   if (m.type === 'CANCEL_FFMPEG_MERGE') isCancelled = true;
 });
 

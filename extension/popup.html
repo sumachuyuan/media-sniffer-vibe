@@ -629,21 +629,27 @@
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <div style="display:flex; align-items:center; gap:8px;">
         <span id="record-indicator" style="width:7px; height:7px; border-radius:50%; background:#444; display:inline-block; transition: background 0.3s;"></span>
-        <span style="font-size:9px; color:#777; font-weight:700; text-transform:uppercase; letter-spacing:1.5px;">标签页录制</span>
+        <span data-i18n="recordTabTitle" style="font-size:9px; color:#777; font-weight:700; text-transform:uppercase; letter-spacing:1.5px;">标签页录制</span>
         <span id="record-timer" style="display:none; font-family:monospace; color:#ff5252; font-size:9px; font-weight:800; letter-spacing:0.5px; padding:2px 5px; border-radius:3px; background:rgba(255,82,82,0.08);">00:00:00</span>
       </div>
       <div style="display:flex; gap:6px; align-items:center;">
+        <label id="record-audio-only-wrap" style="display:flex; align-items:center; gap:3px; cursor:pointer; font-size:9px; color:#ab47bc; font-weight:700; letter-spacing:0.3px; white-space:nowrap;">
+          <input type="checkbox" id="record-audio-only" style="width:11px; height:11px; cursor:pointer; accent-color:#ab47bc; margin:0;">
+          <span data-i18n="recordAudioOnly">仅录音</span>
+        </label>
         <select id="record-quality" style="background:#111; color:#888; border:1px solid rgba(255,255,255,0.1); border-radius:4px; font-size:9px; font-weight:700; padding:3px 6px; cursor:pointer; letter-spacing:0.3px; outline:none;">
-          <option value="UHD">原画</option>
+          <option value="UHD" data-i18n="recordQualityUHD">原画</option>
           <option value="1080P" selected>1080P</option>
           <option value="720P">720P</option>
         </select>
-        <button id="record-start-btn" style="background:rgba(255,60,60,0.15); color:#ff5252; border:1px solid rgba(255,60,60,0.3); border-radius:4px; font-size:9px; font-weight:800; padding:4px 10px; cursor:pointer; letter-spacing:0.5px;">开始</button>
-        <button id="record-stop-btn" disabled style="background:rgba(255,255,255,0.03); color:#444; border:1px solid rgba(255,255,255,0.08); border-radius:4px; font-size:9px; font-weight:800; padding:4px 10px; cursor:not-allowed; letter-spacing:0.5px;">停止</button>
+        <button id="record-start-btn" data-i18n="recordStart" style="background:rgba(255,60,60,0.15); color:#ff5252; border:1px solid rgba(255,60,60,0.3); border-radius:4px; font-size:9px; font-weight:800; padding:4px 10px; cursor:pointer; letter-spacing:0.5px;">开始</button>
+        <button id="record-stop-btn" data-i18n="recordStop" disabled style="background:rgba(255,255,255,0.03); color:#444; border:1px solid rgba(255,255,255,0.08); border-radius:4px; font-size:9px; font-weight:800; padding:4px 10px; cursor:not-allowed; letter-spacing:0.5px;">停止</button>
+        <button id="record-save-video-btn" data-i18n="recordSaveVideo" style="display:none; background:rgba(41,182,246,0.15); color:#29b6f6; border:1px solid rgba(41,182,246,0.3); border-radius:4px; font-size:9px; font-weight:800; padding:4px 10px; cursor:pointer; letter-spacing:0.5px;">保存视频</button>
+        <button id="record-extract-audio-btn" data-i18n="recordExtractAudio" style="display:none; background:rgba(171,71,188,0.15); color:#ab47bc; border:1px solid rgba(171,71,188,0.3); border-radius:4px; font-size:9px; font-weight:800; padding:4px 10px; cursor:pointer; letter-spacing:0.5px;">提取音频</button>
       </div>
     </div>
     <div id="record-macos-notice" style="margin-top:6px; font-size:8px; color:#444; line-height:1.5; display:none;">
-      ⚠ macOS: 若无音频，请确保在「系统偏好设置 › 安全性与隐私 › 麦克风」中授权了 Chrome
+      <span data-i18n="recordMacosNotice">⚠ macOS: 若无音频，请确保在「系统偏好设置 › 安全性与隐私 › 麦克风」中授权了 Chrome</span>
     </div>
     <div id="record-stats" style="display:none; margin-top:8px; font-size:9px; color:#555; font-family:monospace; line-height:1.8; padding: 6px 8px; background:rgba(255,255,255,0.02); border-radius:4px;"></div>
   </div>

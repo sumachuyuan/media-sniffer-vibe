@@ -40,6 +40,7 @@ let state = {
     recordFileHandle: null,  // retained after recording for remux
     recordFilename: null,
     recordingStartTime: null,
+    isAudioOnly: false,      // Phase 8: audio-only recording mode
 };
 
 // Phase 6: timer + I/O recovery state
@@ -132,17 +133,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('searchBar').oninput = () => renderUrls();
 
     // --- Phase 4: Real tab capture + audio + resolution ---
-    const startBtn   = document.getElementById('record-start-btn');
-    const stopBtn    = document.getElementById('record-stop-btn');
-    const statsEl    = document.getElementById('record-stats');
-    const dotEl      = document.getElementById('record-indicator');
-    const qualityEl  = document.getElementById('record-quality');
-    const macosNotice = document.getElementById('record-macos-notice');
+    const startBtn        = document.getElementById('record-start-btn');
+    const stopBtn         = document.getElementById('record-stop-btn');
+    const statsEl         = document.getElementById('record-stats');
+    const dotEl           = document.getElementById('record-indicator');
+    const qualityEl       = document.getElementById('record-quality');
+    const macosNotice     = document.getElementById('record-macos-notice');
+    const audioOnlyEl     = document.getElementById('record-audio-only');
+    const saveVideoBtn    = document.getElementById('record-save-video-btn');
+    const extractAudioBtn = document.getElementById('record-extract-audio-btn');
 
     // Show macOS audio notice on macOS
-    if (navigator.platform.startsWith('Mac') || navigator.userAgent.includes('Mac')) {
-      if (macosNotice) macosNotice.style.display = 'block';
-    }
+    const _isMacOS = navigator.platform.startsWith('Mac') || navigator.userAgent.includes('Mac');
+    if (_isMacOS && macosNotice) macosNotice.style.display = 'block';
+
+    // Phase 8: audio-only toggle — hide quality selector and macOS notice when active
+    audioOnlyEl?.addEventListener('change', () => {
+      const on = audioOnlyEl.checked;
+      if (qualityEl) qualityEl.style.display = on ? 'none' : '';
+      if (macosNotice) macosNotice.style.display = (on || !_isMacOS) ? 'none' : 'block';
+    });
 
     startBtn.onclick = async () => {
       // Step 1: Get the active tab ID for tabCapture.
@@ -150,7 +160,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const tabId = tabs[0]?.id;
       if (!tabId) {
         statsEl.style.display = 'block';
-        statsEl.innerHTML = `<span style="color:#f44">错误: 无法获取当前标签页</span>`;
+        statsEl.innerHTML = `<span style="color:#f44">${t('recordErrorTab')}</span>`;
         return;
       }
 
@@ -158,11 +168,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       let streamId;
       try {
         const resp = await chrome.runtime.sendMessage({ type: 'GET_TAB_STREAM_ID', targetTabId: tabId });
-        if (!resp?.streamId) throw new Error(resp?.error || '无法获取标签页流 ID');
+        if (!resp?.streamId) throw new Error(resp?.error || t('recordErrorStreamId'));
         streamId = resp.streamId;
       } catch (err) {
         statsEl.style.display = 'block';
-        statsEl.innerHTML = `<span style="color:#f44">错误: ${err.message}</span>`;
+        statsEl.innerHTML = `<span style="color:#f44">${t('error')}: ${err.message}</span>`;
         return;
       }
 
@@ -177,18 +187,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       } catch (err) {
         if (err.name === 'AbortError') return; // User cancelled — no toast
-        ui.showToast(`文件选择失败: ${err.message}`, 'error');
+        ui.showToast(`${t('error')}: ${err.message}`, 'error');
         return;
       }
 
-      const quality = qualityEl?.value || '1080P';
+      const isAudioOnly = audioOnlyEl?.checked || false;
+      const quality = isAudioOnly ? '1080P' : (qualityEl?.value || '1080P');
       state.recordFileHandle = fileHandle;
       state.recordFilename = null; // cleared until RECORD_STOPPED
+      state.isAudioOnly = isAudioOnly;
 
       // Store fileHandle in IndexedDB so the offscreen document can retrieve it
       // without losing its prototype chain through chrome.runtime.sendMessage IPC.
       await _storeFileHandle(fileHandle);
-      chrome.runtime.sendMessage({ type: 'START_RECORD_TEST', streamId, quality, filename: fileHandle.name });
+      chrome.runtime.sendMessage({ type: 'START_RECORD_TEST', streamId, quality, filename: fileHandle.name, isAudioOnly });
       startRecordingTimer(Date.now());
       startBtn.disabled = true;
       startBtn.style.opacity = '0.4';
@@ -202,9 +214,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       dotEl.style.boxShadow = '0 0 6px #ff5252';
       statsEl.style.display = 'block';
       statsEl.innerHTML =
-        `录制文件: <b style="color:#aaa">${fileHandle.name}</b>` +
+        t('recordFileReady', [fileHandle.name]) +
         `&nbsp;&nbsp;<span style="color:#555">${quality}</span>` +
-        `&nbsp; 等待编码器...`;
+        `&nbsp; ${t('recordWaitingEncoder')}`;
     };
 
     stopBtn.onclick = () => {
@@ -219,6 +231,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       dotEl.style.boxShadow = 'none';
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
     };
+
+    // Phase 8: export button handlers (shown after RECORD_STOPPED, enabled after RECORD_BLOB_READY)
+    if (saveVideoBtn) {
+      saveVideoBtn.onclick = () => {
+        if (!state.recordFilename) return;
+        saveVideoBtn.disabled = true;
+        saveVideoBtn.style.opacity = '0.4';
+        chrome.runtime.sendMessage({
+          type: 'START_WEBM_REMUX',
+          outputName: state.recordFilename,
+        });
+      };
+    }
+    if (extractAudioBtn) {
+      extractAudioBtn.onclick = () => {
+        if (!state.recordFilename) return;
+        extractAudioBtn.disabled = true;
+        extractAudioBtn.style.opacity = '0.4';
+        chrome.runtime.sendMessage({
+          type: 'START_AUDIO_EXTRACT',
+          outputName: state.recordFilename,
+        });
+      };
+    }
 
     document.getElementById('global-cancel-btn').onclick = () => {
         if (state.mergingUrl) {
@@ -257,7 +293,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (dotEl) { dotEl.style.background = '#ff5252'; dotEl.style.boxShadow = '0 0 6px #ff5252'; }
             if (statsEl) {
                 statsEl.style.display = 'block';
-                statsEl.innerHTML = `<span style="color:#ff5252">⬤ 录制中…</span>&nbsp;&nbsp;<span style="color:#555">${rs.quality || ''}</span>`;
+                statsEl.innerHTML = `<span style="color:#ff5252">${t('recordingStateText')}</span>&nbsp;&nbsp;<span style="color:#555">${rs.quality || ''}</span>`;
             }
             // Start local timer ticking from persisted startTime
             if (rs.startTime) startRecordingTimer(rs.startTime);
@@ -514,10 +550,10 @@ function handleRuntimeMessages(m) {
       const statsEl = document.getElementById('record-stats');
       if (!statsEl) return;
       const modeColor = m.mode === 'HW' ? '#00e676' : '#ffb300';
-      const modeLabel = m.mode === 'HW' ? 'GPU 硬编' : '软件编码';
+      const modeLabel = m.mode === 'HW' ? t('recordGpuHw') : t('recordSoftSw');
       statsEl.style.display = 'block';
       statsEl.innerHTML =
-        `编码器就绪 &nbsp;` +
+        `${t('recordEncoderReady')} &nbsp;` +
         `<b style="color:${modeColor};padding:1px 5px;border:1px solid ${modeColor};border-radius:3px;font-size:8px;">${modeLabel}</b>` +
         `&nbsp;&nbsp;<span style="color:#555">${m.codec}</span>`;
       return;
@@ -526,8 +562,27 @@ function handleRuntimeMessages(m) {
       const s = m.stats;
       const statsEl = document.getElementById('record-stats');
       if (!statsEl) return;
+
+      const elapsedStr = formatElapsed(s.elapsed || 0);
+      // Sync timer element with worker's authoritative elapsed value
+      const timerEl = document.getElementById('record-timer');
+      if (timerEl && timerEl.style.display !== 'none') timerEl.textContent = elapsedStr;
+
+      // Phase 8: audio-only mode — show compact audio-only stats
+      if (state.isAudioOnly) {
+        const finalLine = s.final
+          ? `<br><span style="color:#aaa">总录音: <b>${s.writtenMB} MB</b></span>`
+          : '';
+        statsEl.innerHTML =
+          `audio: <b style="color:#ab47bc">${s.audioEncodedCount || 0} pkts</b>` +
+          `&nbsp;&nbsp;written: <b style="color:#29b6f6">${s.writtenMB} MB</b>` +
+          `<br>elapsed: <b style="color:#aaa">${elapsedStr}</b>` +
+          finalLine;
+        return;
+      }
+
       const modeColor = s.encoderMode === 'HW' ? '#00e676' : '#ffb300';
-      const modeLabel = s.encoderMode === 'HW' ? 'GPU 硬编' : '软件编码';
+      const modeLabel = s.encoderMode === 'HW' ? t('recordGpuHw') : t('recordSoftSw');
       const audioLine = s.hasAudio
         ? `&nbsp;&nbsp;audio: <b style="color:#ab47bc">${s.audioEncodedCount || 0} pkts</b>`
         : '';
@@ -538,14 +593,9 @@ function handleRuntimeMessages(m) {
         : '';
       // I/O recovery toast: bitrateReduced true→false
       if (_prevBitrateReduced && !s.bitrateReduced) {
-        ui.showToast('I/O 已恢复，码率已还原');
+        ui.showToast(t('recordIoRecovered'));
       }
       _prevBitrateReduced = !!s.bitrateReduced;
-
-      const elapsedStr = formatElapsed(s.elapsed || 0);
-      // Sync timer element with worker's authoritative elapsed value
-      const timerEl = document.getElementById('record-timer');
-      if (timerEl && timerEl.style.display !== 'none') timerEl.textContent = elapsedStr;
 
       const finalLine = s.final
         ? `<br><span style="color:#aaa">总编码: <b>${s.totalEncodedMB} MB</b></span>`
@@ -568,18 +618,55 @@ function handleRuntimeMessages(m) {
     if (m.type === 'RECORD_STOPPED') {
       stopRecordingTimer();
       _prevBitrateReduced = false;
-      const statsEl    = document.getElementById('record-stats');
-      const startBtn   = document.getElementById('record-start-btn');
-      const qualityEl  = document.getElementById('record-quality');
-      const dotEl      = document.getElementById('record-indicator');
+      const statsEl         = document.getElementById('record-stats');
+      const startBtn        = document.getElementById('record-start-btn');
+      const stopBtnEl       = document.getElementById('record-stop-btn');
+      const qualityEl       = document.getElementById('record-quality');
+      const dotEl           = document.getElementById('record-indicator');
+      const saveVideoBtnEl  = document.getElementById('record-save-video-btn');
+      const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
       if (statsEl) statsEl.innerHTML +=
-        `<br><span style="color:#29b6f6">文件已写入: <b>${m.filename || '—'}</b></span>` +
-        `<br><span style="color:#ff5252">已停止 — 共传输 <b>${m.totalFrames}</b> 帧给编码器</span>` +
-        `<br><span style="color:#ffa726">⏳ 正在自动转封装为 MP4...</span>`;
+        `<br><span style="color:#29b6f6">${t('recordFileWritten', [m.filename || '—'])}</span>` +
+        `<br><span style="color:#ff5252">${t('recordStoppedTotal', [m.totalFrames])}</span>` +
+        `<br><span style="color:#ffa726">⏳ 等待数据写入完成...</span>`;
       if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
       if (dotEl)    { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
       if (m.filename) state.recordFilename = m.filename;
+      // Phase 8: swap stop button for export buttons (disabled until IDB write completes)
+      if (stopBtnEl) stopBtnEl.style.display = 'none';
+      if (saveVideoBtnEl) {
+        saveVideoBtnEl.style.display = 'inline-block';
+        saveVideoBtnEl.disabled = true;
+        saveVideoBtnEl.style.opacity = '0.3';
+        saveVideoBtnEl.style.cursor = 'not-allowed';
+      }
+      if (extractAudioBtnEl) {
+        extractAudioBtnEl.style.display = 'inline-block';
+        extractAudioBtnEl.disabled = true;
+        extractAudioBtnEl.style.opacity = '0.3';
+        extractAudioBtnEl.style.cursor = 'not-allowed';
+      }
+      return;
+    }
+    if (m.type === 'RECORD_BLOB_READY') {
+      // IDB write confirmed — enable export buttons
+      const saveVideoBtnEl    = document.getElementById('record-save-video-btn');
+      const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+      const statsEl           = document.getElementById('record-stats');
+      if (m.filename) state.recordFilename = m.filename;
+      if (saveVideoBtnEl) {
+        saveVideoBtnEl.disabled = false;
+        saveVideoBtnEl.style.opacity = '1';
+        saveVideoBtnEl.style.cursor = 'pointer';
+      }
+      if (extractAudioBtnEl) {
+        extractAudioBtnEl.disabled = false;
+        extractAudioBtnEl.style.opacity = '1';
+        extractAudioBtnEl.style.cursor = 'pointer';
+      }
+      if (statsEl) statsEl.innerHTML +=
+        `<br><span style="color:#ffa726">✅ 数据已就绪，请选择导出格式</span>`;
       return;
     }
     if (m.type === 'RECORD_ERROR') {
@@ -587,12 +674,17 @@ function handleRuntimeMessages(m) {
       _prevBitrateReduced = false;
       const statsEl   = document.getElementById('record-stats');
       const startBtn  = document.getElementById('record-start-btn');
-      const stopBtn   = document.getElementById('record-stop-btn');
+      const stopBtnEl = document.getElementById('record-stop-btn');
       const qualityEl = document.getElementById('record-quality');
       const dotEl     = document.getElementById('record-indicator');
-      if (statsEl) { statsEl.style.display = 'block'; statsEl.innerHTML = `<span style="color:#ff5252">错误: ${m.error}</span>`; }
+      const saveVideoBtnEl    = document.getElementById('record-save-video-btn');
+      const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+      if (statsEl) { statsEl.style.display = 'block'; statsEl.innerHTML = `<span style="color:#ff5252">${t('error')}: ${m.error}</span>`; }
       if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
-      if (stopBtn)  { stopBtn.disabled = true; stopBtn.style.cursor = 'not-allowed'; }
+      // Restore stop btn, hide export buttons
+      if (stopBtnEl) { stopBtnEl.style.display = ''; stopBtnEl.disabled = true; stopBtnEl.style.cursor = 'not-allowed'; }
+      if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
+      if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
       if (dotEl)    { dotEl.style.background = '#f44'; dotEl.style.boxShadow = 'none'; }
       return;
@@ -617,12 +709,32 @@ function handleRuntimeMessages(m) {
     } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
         const isProxy = m.isProxy;
         const isRemux = m.isRemux;
+        const isAudioExtract = m.isAudioExtract;
         if (m.type === 'FFMPEG_COMPLETE') {
-            ui.showToast(isRemux ? 'MP4 转封装完成，文件已保存' : t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
+            if (isAudioExtract) ui.showToast(t('recordAudioComplete'));
+            else if (isRemux)   ui.showToast(t('recordRemuxComplete'));
+            else                ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
         } else {
-            ui.showToast(isRemux ? `MP4 转封装失败: ${m.error}` : t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
+            if (isAudioExtract) ui.showToast(t('recordAudioFailed', [m.error]), 'error');
+            else if (isRemux)   ui.showToast(t('recordRemuxFailed', [m.error]), 'error');
+            else                ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
+        }
+        // Restore export buttons to clickable state after operation completes
+        if (isRemux || isAudioExtract) {
+            const saveVideoBtnEl    = document.getElementById('record-save-video-btn');
+            const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+            if (saveVideoBtnEl && saveVideoBtnEl.style.display !== 'none') {
+                saveVideoBtnEl.disabled = false;
+                saveVideoBtnEl.style.opacity = '1';
+                saveVideoBtnEl.style.cursor = 'pointer';
+            }
+            if (extractAudioBtnEl && extractAudioBtnEl.style.display !== 'none') {
+                extractAudioBtnEl.disabled = false;
+                extractAudioBtnEl.style.opacity = '1';
+                extractAudioBtnEl.style.cursor = 'pointer';
+            }
         }
         resetUI();
-        if (!isRemux) setTimeout(renderUrls, 2500);
+        if (!isRemux && !isAudioExtract) setTimeout(renderUrls, 2500);
     }
 }
