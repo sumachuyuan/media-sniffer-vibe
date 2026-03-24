@@ -316,6 +316,17 @@ async function handleWebMRemux(m) {
   try {
     sendProgress(5, outputName, '读取录制文件...');
 
+    // Ensure read permission is still granted in this new offscreen context.
+    // After the record offscreen closes and a new FFmpeg offscreen opens, the
+    // FileSystemFileHandle retrieved from IDB may need an explicit permission check.
+    if (typeof fileHandle.queryPermission === 'function') {
+      const perm = await fileHandle.queryPermission({ mode: 'read' });
+      if (perm !== 'granted') {
+        const req = await fileHandle.requestPermission({ mode: 'read' });
+        if (req !== 'granted') throw new DOMException('Read permission denied for recorded file', 'NotAllowedError');
+      }
+    }
+
     // Read the WebM file back through the FileSystemFileHandle
     const file = await fileHandle.getFile();
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(0);
@@ -353,10 +364,11 @@ async function handleWebMRemux(m) {
       isRemux: true,
     }).catch(() => {});
   } catch (e) {
-    logger.error('[Remux] Error', e);
+    const detail = `${e.name || 'Error'}: ${e.message || String(e)}`;
+    logger.error(`[Remux] Error — ${detail}`, e);
     chrome.runtime.sendMessage({
       type: 'FFMPEG_ERROR',
-      error: `MP4 转封装失败: ${e.message}`,
+      error: `MP4 转封装失败: ${detail}`,
       url: outputName,
       isRemux: true,
     }).catch(() => {});
