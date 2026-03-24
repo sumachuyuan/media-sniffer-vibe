@@ -1,14 +1,18 @@
 /**
- * Record Worker — Phase 3: WebM Muxer + FileSystem Direct-Write
+ * Record Worker — WebCodecs encoding + VibeMuxer streaming
  *
- * Adds disk streaming on top of Phase 2's WebCodecs encoding:
- *   VideoFrame (Transferable) → VideoEncoder → EncodedVideoChunk
- *     → VibeMuxer → WritableFileStream → SSD
+ * Pipeline:
+ *   VideoFrame (Transferable) → VideoEncoder (H.264 HW/SW or VP9)
+ *     → VibeMuxer → IDB WritableStream (transferred from record/offscreen.js)
+ *   AudioData  (Transferable) → AudioEncoder (Opus 128 kbps)
+ *     → VibeMuxer (same stream, interleaved with video)
  *
  * Message protocol (in):
- *   { type: 'INIT',  width, height, fileHandle }  → init encoder + muxer, open file
- *   { type: 'FRAME', frame, index }               → encode frame (Transferable)
- *   { type: 'STOP' }                              → flush encoder → drain muxer → close file
+ *   { type: 'INIT',        width, height, writable, filename, quality,
+ *                          hasAudio, isAudioOnly, sampleRate, channels }
+ *   { type: 'FRAME',       frame, index }       — VideoFrame (Transferable)
+ *   { type: 'AUDIO_FRAME', frame }              — AudioData  (Transferable)
+ *   { type: 'STOP' }                            — flush encoders → finalize muxer
  *
  * Message protocol (out):
  *   { type: 'ENCODER_READY', mode, codec }
@@ -16,7 +20,7 @@
  *           avgFps, instantFps, bitrateKbps, writtenMB,
  *           resolution, encoderMode, elapsed }
  *   { type: 'STATS', ..., final: true, totalEncodedMB, totalWrittenMB }
- *   { type: 'RECORD_WRITE_COMPLETE', filename }   → file closed, offscreen can clean up
+ *   { type: 'RECORD_WRITE_COMPLETE', filename }
  *   { type: 'ENCODE_ERROR', error }
  */
 
@@ -120,12 +124,13 @@ self.onmessage = async function (e) {
 // ---------------------------------------------------------------------------
 // INIT — probe hardware, configure encoder, open muxer + file
 // ---------------------------------------------------------------------------
-async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAudio, isAudioOnly = false, sampleRate: _sr, channels: _ch }) {
+async function handleInit({ width, height, writable: _writable, filename, quality, hasAudio: _hasAudio, isAudioOnly = false, sampleRate: _sr, channels: _ch }) {
   const sampleRate = _sr || AUDIO_SAMPLE_RATE;
   const channels = _ch || AUDIO_CHANNELS;
 
-  outputName = fileHandle.name;
+  outputName = filename || 'recording.webm';
   hasAudio = !!_hasAudio;
+  writable = _writable;
 
   // Phase 8: audio-only mode — skip VideoEncoder entirely, only init AudioEncoder + muxer.
   if (isAudioOnly) {
@@ -156,15 +161,14 @@ async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAu
     }
 
     try {
-      writable = await fileHandle.createWritable();
+      // Phase 9: writable is now passed directly from offscreen.js
       muxer = new VibeMuxer(writable, {
-        width: 1, height: 1,
-        codec: CODEC_H264_SW,
-        isAudioOnly: true, // Phase 8: signal audio-only tracks to muxer
-        ...(hasAudio ? { sampleRate, channels } : {}),
+        isAudioOnly: true,
+        sampleRate,
+        channels,
       });
     } catch (err) {
-      self.postMessage({ type: 'ENCODE_ERROR', error: `Cannot open file for writing: ${err.message}` });
+      self.postMessage({ type: 'ENCODE_ERROR', error: `Cannot initialized Muxer: ${err.message}` });
       return;
     }
 
@@ -250,9 +254,8 @@ async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAu
     hasAudio = false;
   }
 
-  // Open the writable file stream and create the muxer
+  // Open the writable stream (transferred from offscreen) and create the muxer
   try {
-    writable = await fileHandle.createWritable();
     muxer = new VibeMuxer(writable, {
       width: encodeWidth,
       height: encodeHeight,
@@ -260,7 +263,7 @@ async function handleInit({ width, height, fileHandle, quality, hasAudio: _hasAu
       ...(hasAudio ? { sampleRate, channels } : {}),
     });
   } catch (err) {
-    self.postMessage({ type: 'ENCODE_ERROR', error: `Cannot open file for writing: ${err.message}` });
+    self.postMessage({ type: 'ENCODE_ERROR', error: `Cannot initialized Muxer: ${err.message}` });
     return;
   }
 

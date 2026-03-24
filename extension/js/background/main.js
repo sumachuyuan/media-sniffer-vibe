@@ -16,6 +16,21 @@ import {
   getIsRecordActive,
 } from './orchestrator.js';
 
+// ---------------------------------------------------------------------------
+// Recording state helper — single write path for chrome.storage.local
+// ---------------------------------------------------------------------------
+/**
+ * Merge `patch` into the persisted `recordingState` object.
+ * Using a merge (rather than full replace) ensures fields set by previous
+ * events (e.g. filename, isAudioOnly) are preserved across lifecycle transitions.
+ */
+function _setRecordState(patch) {
+  chrome.storage.local.get('recordingState', (res) => {
+    const prev = res?.recordingState || {};
+    chrome.storage.local.set({ recordingState: { ...prev, ...patch } }).catch(() => {});
+  });
+}
+
 // --- Helper: Add Media to Storage ---
 function sanitizeTitle(title) {
   if (!title || title === 'Embedded Media' || title === chrome.i18n.getMessage('targetPage')) return title || chrome.i18n.getMessage('targetPage');
@@ -351,14 +366,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       isAudioOnly: request.isAudioOnly || false,
     });
     // Persist recording state so popup can restore UI after being reopened.
-    chrome.storage.local.set({
-      recordingState: {
-        isRecording: true,
-        startTime: Date.now(),
-        filename: request.filename || null,
-        quality: request.quality || '1080P',
-      },
-    }).catch(() => {});
+    _setRecordState({
+      isRecording: true,
+      isConsolidating: false,
+      isReady: false,
+      startTime: Date.now(),
+      filename: request.filename || null,
+      quality: request.quality || '1080P',
+    });
     sendResponse({ status: 'dispatched' });
   }
 
@@ -385,18 +400,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.runtime.sendMessage(request).catch(() => {});
 
     if (type === 'RECORD_STOPPED') {
-      chrome.storage.local.set({
-        recordingState: {
-          isRecording: false,
-          isReady: true,
-          filename: request.filename,
-          isAudioOnly: !!request.isAudioOnly,
-          stoppedAt: Date.now()
-        }
-      }).catch(() => {});
+      // isConsolidating = true: popup shows "正在写入..." until RECORD_BLOB_READY arrives.
+      _setRecordState({
+        isRecording: false,
+        isConsolidating: true,
+        isReady: false,
+        filename: request.filename,
+        isAudioOnly: !!request.isAudioOnly,
+        stoppedAt: Date.now(),
+      });
     }
     if (type === 'RECORD_ERROR') {
-      chrome.storage.local.set({ recordingState: { isRecording: false, isReady: false } }).catch(() => {});
+      _setRecordState({ isRecording: false, isConsolidating: false, isReady: false });
     }
 
     // Do NOT close the record offscreen here. record/offscreen.js is still
@@ -412,6 +427,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // the export buttons. The user then chooses to save video or extract audio.
   if (type === 'RECORD_BLOB_READY') {
     logger.info('[Signal] Received BLOB_READY, storage confirmed.');
+    // Transition out of isConsolidating before notifying the popup.
+    _setRecordState({ isConsolidating: false, isReady: true });
     closeRecordOffscreen().then(() => {
       chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename: request.filename }).catch(() => {});
     });
@@ -434,6 +451,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (type === 'RECORD_BLOB_FAILED') {
     logger.warn(`Remux blob storage failed for ${request.filename}: ${request.error}`);
+    _setRecordState({ isRecording: false, isConsolidating: false, isReady: false });
     closeRecordOffscreen();
     chrome.runtime.sendMessage({
       type: 'FFMPEG_ERROR',
@@ -473,12 +491,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     };
 
     if (type === 'FFMPEG_COMPLETE') {
-      // Close offscreen only after the download is registered so the browser has
-      // captured the blob before the document (and its blob URLs) are destroyed.
-      chrome.downloads.download(
-        { url: request.blobUrl || request.dataUrl, filename: request.filename, saveAs: true },
-        closeOffscreen
-      );
+      if (request.useIDBOutput) {
+        // Phase 9: Data handled by Popup via IndexedDB.
+        // Background only cleans up the offscreen document.
+        closeOffscreen();
+      } else {
+        // Legacy/Standard FFmpeg flow: trigger download with blobUrl/dataUrl
+        chrome.downloads.download(
+          { url: request.blobUrl || request.dataUrl, filename: request.filename, saveAs: true },
+          closeOffscreen
+        );
+      }
     } else {
       closeOffscreen();
     }

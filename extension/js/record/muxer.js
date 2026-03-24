@@ -250,42 +250,6 @@
   // -------------------------------------------------------------------------
 
   /**
-   * Encodes one EncodedVideoChunk as a WebM SimpleBlock.
-   *
-   * SimpleBlock wire format (inside the EBML element body):
-   *   [track VINT]  [relative timestamp int16 BE]  [flags byte]  [frame data]
-   *
-   * flags: 0x80 = keyframe; 0x00 = non-keyframe (delta)
-   */
-  /**
-   * Encodes one EncodedAudioChunk as a WebM SimpleBlock on audio track (track 2).
-   * Uses VINT 0x82 (track 2), same wire format as video SimpleBlock.
-   */
-  /**
-   * @param {EncodedAudioChunk} chunk
-   * @param {number} clusterTimestampMs
-   * @param {number|undefined} overrideTimestampUs  If provided, used instead of chunk.timestamp
-   */
-  function buildAudioSimpleBlock(chunk, clusterTimestampMs, overrideTimestampUs) {
-    const chunkTimeMs  = overrideTimestampUs !== undefined
-      ? Math.round(overrideTimestampUs / 1000)
-      : Math.round(chunk.timestamp / 1000);
-    const relativeTs   = Math.max(0, chunkTimeMs - clusterTimestampMs);
-    const clampedRelTs = Math.min(relativeTs, 32767);
-
-    const blockHeader = concat(
-      new Uint8Array([0x82]),          // track number 2 as VINT
-      uint(clampedRelTs, 2),
-      new Uint8Array([0x00]),          // audio frames are not keyframe-flagged
-    );
-
-    const frameBytes = new Uint8Array(chunk.byteLength);
-    chunk.copyTo(frameBytes);
-
-    return el(ID.SimpleBlock, concat(blockHeader, frameBytes));
-  }
-
-  /**
    * @param {EncodedVideoChunk} chunk
    * @param {number} clusterTimestampMs
    * @param {number|undefined} overrideTimestampUs  If provided, used instead of chunk.timestamp
@@ -317,8 +281,8 @@
 
   class VibeMuxer {
     /**
-     * @param {FileSystemWritableFileStream} writable
-     * @param {{ width: number, height: number, codec: string, sampleRate?: number, channels?: number }} options
+     * @param {WritableStream|FileSystemWritableFileStream} writable
+     * @param {{ width: number, height: number, codec: string, sampleRate?: number, channels?: number, isAudioOnly?: boolean }} options
      */
     constructor(writable, { width, height, codec, sampleRate, channels, isAudioOnly = false }) {
       this._writable      = writable;
@@ -328,10 +292,15 @@
       this._audioOpts     = (sampleRate && channels) ? { sampleRate, channels } : null;
       this._isAudioOnly   = isAudioOnly;
 
-      this._headerWritten   = false;
-      this._pendingChunks   = [];   // video chunks buffered before first keyframe
-      this._clusterTimeMs   = -1;   // current cluster's start timestamp (ms)
+      this._headerWritten    = false;
+      this._pendingChunks    = [];   // video chunks buffered before first keyframe
+      this._clusterTimeMs    = -1;   // current cluster's start timestamp (ms)
       this._CLUSTER_DURATION = 1000; // open a new cluster at most every 1000 ms
+
+      // Acquire a persistent WritableStreamDefaultWriter for standard WritableStreams
+      // (transferred IDB adapter). FileSystemWritableFileStream exposes .write()
+      // directly on the object itself, so it does not need a writer.
+      this._writer = (typeof writable.write === 'function') ? null : writable.getWriter();
     }
 
     /**
@@ -457,18 +426,28 @@
     }
 
     async _write(data) {
-      await this._writable.write(data);
+      if (this._writer) {
+        await this._writer.write(data);
+      } else {
+        // FileSystemWritableFileStream: exposes .write() directly on the object
+        await this._writable.write(data);
+      }
     }
 
-    /** Close the WritableFileStream. Normal exit; file is complete and seekable. */
+    /** Flush and close the stream. Normal exit; file is complete and seekable. */
     async finalize() {
       if (!this._headerWritten && this._isAudioOnly) {
-        // Phase 8: Ensure header is written even for extremely short audio-only recordings
-        // (where stop() was called before the first audio packet was encoded).
+        // Ensure header is written even for extremely short audio-only recordings
+        // (stop() called before the first audio packet was encoded).
         await this._writeHeader(null);
         this._headerWritten = true;
       }
-      await this._writable.close();
+      if (this._writer) {
+        await this._writer.close();
+        this._writer = null;
+      } else {
+        await this._writable.close();
+      }
     }
   }
 

@@ -1,102 +1,26 @@
 /**
- * Record Offscreen Document — Phase 4: Real Tab Capture + Audio + Resolution
+ * Record Offscreen Document
  *
- * Full pipeline (Phase 4):
+ * Pipeline:
  *   chrome.tabCapture.getMediaStreamId() [background]
  *     → getUserMedia({ chromeMediaSource:'tab', chromeMediaSourceId: streamId })
  *       → MediaStreamTrackProcessor → ReadableStream<VideoFrame>
  *           → worker.postMessage(frame, [frame])         ← Transferable zero-copy
- *             → Worker: VideoEncoder (GPU/SW H.264) + OffscreenCanvas downscale
- *               → VibeMuxer → WritableFileStream → SSD
+ *             → Worker: VideoEncoder (GPU/SW H.264) + createImageBitmap downscale
+ *               → VibeMuxer → IDB WritableStream
  *       → MediaStreamTrackProcessor → ReadableStream<AudioData>
  *           → worker.postMessage(frame, [frame])
  *             → Worker: AudioEncoder (Opus 128 kbps)
- *               → VibeMuxer.addAudioChunk() → same WritableFileStream
- *
- * Key changes vs Phase 3:
- *  - startTest({ fileHandle, streamId, quality }): receives a streamId from popup
- *  - getUserMedia replaces the synthetic canvas captureStream
- *  - Audio track is captured and sent to worker via AUDIO_FRAME messages
- *  - quality ('UHD'/'1080P'/'720P') is forwarded to Worker for OffscreenCanvas downscaling
- *  - INIT message now includes { width, height, fileHandle, quality, hasAudio }
+ *               → VibeMuxer.addAudioChunk() → same IDB WritableStream
  */
 import { logger } from '../common/logger.js';
+import {
+  createChunkWritableStream,
+  consolidateChunks,
+  clearSession,
+} from './storage.js';
 
 const COMPONENT = '[RecordOffscreen]';
-
-// ---------------------------------------------------------------------------
-// IndexedDB helper — retrieves the FileSystemFileHandle stored by the popup.
-// Using IDB avoids losing the prototype chain that occurs when the handle is
-// passed through chrome.runtime.sendMessage across IPC boundaries.
-// ---------------------------------------------------------------------------
-const _IDB = { name: 'vibeRecordDB', store: 'handles', key: 'currentFileHandle' };
-const _IDB_REMUX_KEY = 'remuxInputBlob';
-
-/**
- * Read the recorded file as an ArrayBuffer and persist it in IDB.
- *
- * Why ArrayBuffer and not File/Blob:
- *   Chrome's structured-clone of File objects across extension offscreen
- *   documents can silently fail retrieval. A plain ArrayBuffer is always
- *   serialisable and retrieves reliably.
- *
- * Why tx.oncomplete and not put.onsuccess:
- *   put.onsuccess fires when the IDB request is accepted but before the
- *   transaction is committed. Resolving on put.onsuccess + db.close() can
- *   race the commit, leaving the entry absent for subsequent readers.
- *   tx.oncomplete fires only after the transaction is durably committed.
- */
-async function _storeRemuxBytes(fileHandle) {
-  const file = await fileHandle.getFile();
-  logger.info(`${COMPONENT} Reading recorded file for remux (${(file.size / 1024 / 1024).toFixed(1)} MB)...`);
-  const buffer = await file.arrayBuffer();
-  logger.info(`${COMPONENT} Storing remux bytes in IDB...`);
-  await new Promise((resolve, reject) => {
-    const req = indexedDB.open(_IDB.name, 1);
-    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
-    req.onsuccess = (e) => {
-      const db = e.target.result;
-      const tx = db.transaction(_IDB.store, 'readwrite');
-      tx.objectStore(_IDB.store).put(buffer, _IDB_REMUX_KEY);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror   = () => { db.close(); reject(tx.error); };
-      tx.onabort   = () => { db.close(); reject(new Error('IDB transaction aborted')); };
-    };
-    req.onerror = () => reject(req.error);
-  });
-  logger.info(`${COMPONENT} Remux bytes stored in IDB (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-}
-
-function _retrieveFileHandle() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(_IDB.name, 1);
-    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
-    req.onsuccess = (e) => {
-      const db = e.target.result;
-      const tx = db.transaction(_IDB.store, 'readonly');
-      const get = tx.objectStore(_IDB.store).get(_IDB.key);
-      get.onsuccess = () => { db.close(); resolve(get.result); };
-      get.onerror = () => { db.close(); reject(get.error); };
-    };
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/** Delete any leftover remux bytes from a previous session before starting a new recording. */
-function _clearRemuxBlob() {
-  return new Promise((resolve) => {
-    const req = indexedDB.open(_IDB.name, 1);
-    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
-    req.onsuccess = (e) => {
-      const db = e.target.result;
-      const tx = db.transaction(_IDB.store, 'readwrite');
-      tx.objectStore(_IDB.store).delete(_IDB_REMUX_KEY);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror   = () => { db.close(); resolve(); };
-    };
-    req.onerror = () => resolve();
-  });
-}
 
 let worker = null;
 let mediaStream = null;
@@ -106,6 +30,7 @@ let isRunning = false;
 let frameIndex = 0;
 let wakeLock = null;
 let _isAudioOnly = false;
+let _heartbeatInterval = null;
 
 // ---------------------------------------------------------------------------
 // Main lifecycle
@@ -115,30 +40,32 @@ let _isAudioOnly = false;
  * @param {string}  streamId    From chrome.tabCapture.getMediaStreamId() via background.
  * @param {string}  quality     'UHD' | '1080P' | '720P'
  * @param {boolean} isAudioOnly Phase 8: capture audio track only (no video encoding).
+ * @param {string}  filename    Phase 9: temporary filename for metrics/logging.
  */
-async function startTest({ streamId, quality, isAudioOnly = false }) {
-  // Phase 8: clear any leftover remux data before starting new recording
-  await _clearRemuxBlob().catch(() => {});
+async function startTest({ streamId, quality, isAudioOnly = false, filename = 'recording.webm' }) {
+  // Guard must be set synchronously before any await to prevent re-entrant calls.
+  // Two START_RECORD_TEST messages arriving in quick succession would both pass a
+  // post-await check because JS awaits yield control before isRunning is written.
   if (isRunning) { logger.warn(`${COMPONENT} Already running`); return; }
   isRunning = true;
+
+  await clearSession().catch(() => {});
   frameIndex = 0;
   _isAudioOnly = !!isAudioOnly;
 
-  // Retrieve FileSystemFileHandle from IndexedDB (stored by popup before sending this message).
-  let fileHandle;
-  try {
-    fileHandle = await _retrieveFileHandle();
-    if (!fileHandle || typeof fileHandle.createWritable !== 'function') {
-      throw new Error('IndexedDB に保存された fileHandle が無効または見つかりません');
-    }
-  } catch (err) {
-    logger.error(`${COMPONENT} fileHandle retrieval failed: ${err.message}`);
-    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: `ファイルハンドル取得失敗: ${err.message}` }).catch(() => {});
-    isRunning = false;
-    return;
-  }
+  // Start heartbeat: written to chrome.storage so popup can detect crashes even
+  // if the Service Worker was suspended and restarted between the last heartbeat
+  // and the popup opening.
+  _heartbeatInterval = setInterval(() => {
+    // Optional chaining guards against the rare case where the offscreen document
+    // is being torn down by Chrome when this timer fires its final tick.
+    chrome?.storage?.local?.set({ recordLastHeartbeat: Date.now() })?.catch?.(() => {});
+  }, 5000);
 
-  logger.info(`${COMPONENT} === Phase 4 tab-capture START → "${fileHandle.name}" [${quality}] ===`);
+  // Silent start — IDB-backed WritableStream; transferred to worker zero-copy
+  const writable = createChunkWritableStream();
+
+  logger.info(`${COMPONENT} === Phase 9 tab-capture START [${quality}] ===`);
 
   // 1. Spawn the Record Worker
   const workerUrl = chrome.runtime.getURL('js/record/worker.js');
@@ -158,8 +85,9 @@ async function startTest({ streamId, quality, isAudioOnly = false }) {
     } else if (msg.type === 'RECORD_WRITE_COMPLETE') {
       // Send RECORD_STOPPED immediately so the background clears isRecording
       // in storage without waiting for the (potentially slow) IDB write.
-      logger.info(`${COMPONENT} File write complete: ${msg.filename}`);
-      const filename = msg.filename;
+      logger.info(`${COMPONENT} Chunk capture complete. Consolidating IDB chunks...`);
+      const filename = `vibe_recording_${Date.now()}.webm`;
+      
       chrome.runtime.sendMessage({
         type: 'RECORD_STOPPED',
         totalFrames: frameIndex,
@@ -168,18 +96,13 @@ async function startTest({ streamId, quality, isAudioOnly = false }) {
       }).catch(() => {});
       setTimeout(() => { if (worker) { worker.terminate(); worker = null; } }, 100);
 
-      // Store the recorded bytes in IDB for the FFmpeg remux offscreen.
-      // This is fire-and-forget from the UI perspective; background waits for
-      // RECORD_BLOB_READY before triggering the remux.
-      (async () => {
-        try {
-          await _storeRemuxBytes(fileHandle);
-          chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename }).catch(() => {});
-        } catch (err) {
-          logger.warn(`${COMPONENT} Failed to store remux bytes: ${err.message}`);
-          chrome.runtime.sendMessage({ type: 'RECORD_BLOB_FAILED', filename, error: err.message }).catch(() => {});
-        }
-      })();
+      // Consolidate all IDB chunks into remuxInputBlob for the FFmpeg offscreen.
+      consolidateChunks().then(() => {
+        chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename }).catch(() => {});
+      }).catch((err) => {
+        logger.warn(`${COMPONENT} Failed to consolidate IDB chunks: ${err.message}`);
+        chrome.runtime.sendMessage({ type: 'RECORD_BLOB_FAILED', filename, error: err.message }).catch(() => {});
+      });
 
     } else if (msg.type === 'ENCODE_ERROR') {
       logger.error(`${COMPONENT} ${msg.error}`);
@@ -276,17 +199,19 @@ async function startTest({ streamId, quality, isAudioOnly = false }) {
   }
 
   // 4. Send INIT — include detected audio parameters for the encoder
+  // Phase 9: writable must be transferred to the worker via the second argument
   worker.postMessage({
     type: 'INIT',
     width: s.width,
     height: s.height,
-    fileHandle,
+    writable,
+    filename,
     quality,
     hasAudio,
     isAudioOnly,
     sampleRate: audioSettings.sampleRate,
     channels: audioSettings.channelCount,
-  });
+  }, [writable]);
 
   // 5. Await encoder ready (8 s timeout — tab capture may take longer to initialize)
   let hwInfo;
@@ -363,6 +288,7 @@ async function stopTest() {
   if (!isRunning) return;
   isRunning = false;
 
+  if (_heartbeatInterval) { clearInterval(_heartbeatInterval); _heartbeatInterval = null; }
   if (wakeLock) { await wakeLock.release().catch(() => { }); wakeLock = null; }
   if (videoReader) { await videoReader.cancel().catch(() => { }); videoReader = null; }
   if (audioReader) { await audioReader.cancel().catch(() => { }); audioReader = null; }
@@ -380,7 +306,12 @@ async function stopTest() {
 // ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'START_RECORD_TEST') {
-    startTest({ streamId: msg.streamId, quality: msg.quality || '1080P', isAudioOnly: msg.isAudioOnly || false });
+    startTest({ 
+      streamId: msg.streamId, 
+      quality: msg.quality || '1080P', 
+      isAudioOnly: msg.isAudioOnly || false,
+      filename: msg.filename || 'recording.webm'
+    });
     sendResponse({ ok: true });
     return true;
   }

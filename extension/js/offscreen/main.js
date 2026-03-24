@@ -5,57 +5,11 @@ import { logger } from '../common/logger.js';
 import { initFFmpeg, runFFmpeg, cleanupFS, cleanupAfterMerge } from './ffmpeg.js';
 import { decryptBuffer } from './crypto.js';
 
-// ---------------------------------------------------------------------------
-// IndexedDB helper — retrieves the FileSystemFileHandle stored by the popup.
-// ---------------------------------------------------------------------------
-const _IDB = { name: 'vibeRecordDB', store: 'handles', key: 'currentFileHandle' };
-const _IDB_REMUX_KEY = 'remuxInputBlob';
-
-function _retrieveFileHandle() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(_IDB.name, 1);
-    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
-    req.onsuccess = (e) => {
-      const db = e.target.result;
-      const tx = db.transaction(_IDB.store, 'readonly');
-      const get = tx.objectStore(_IDB.store).get(_IDB.key);
-      get.onsuccess = () => { db.close(); resolve(get.result); };
-      get.onerror = () => { db.close(); reject(get.error); };
-    };
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/** Retrieve the ArrayBuffer saved by record/offscreen.js after recording completes. */
-function _retrieveRemuxBytes() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(_IDB.name, 1);
-    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
-    req.onsuccess = (e) => {
-      const db = e.target.result;
-      const tx = db.transaction(_IDB.store, 'readonly');
-      const get = tx.objectStore(_IDB.store).get(_IDB_REMUX_KEY);
-      get.onsuccess = () => { db.close(); resolve(get.result || null); };
-      get.onerror = () => { db.close(); reject(get.error); };
-    };
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/** Delete the remux bytes from IDB after use to free storage space. */
-function _clearRemuxBlob() {
-  return new Promise((resolve) => {
-    const req = indexedDB.open(_IDB.name, 1);
-    req.onsuccess = (e) => {
-      const db = e.target.result;
-      const tx = db.transaction(_IDB.store, 'readwrite');
-      tx.objectStore(_IDB.store).delete(_IDB_REMUX_KEY);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror = () => { db.close(); resolve(); };
-    };
-    req.onerror = () => resolve();
-  });
-}
+import {
+  loadRemuxInput,
+  deleteRemuxInput,
+  saveRemuxOutput,
+} from '../record/storage.js';
 
 let isMerging = false;
 let isCancelled = false;
@@ -342,7 +296,7 @@ async function handleWebMRemux(m) {
     // record/offscreen.js stores the file as a plain ArrayBuffer in IDB after
     // the worker closes the writable stream — this avoids fileHandle.getFile()
     // which throws SecurityError in a new document context (user activation required).
-    const buffer = await _retrieveRemuxBytes();
+    const buffer = await loadRemuxInput();
     if (!buffer) throw new Error('IDB 中未找到录制数据，请重试录制');
 
     logger.info('[Remux] IDB read success, bytes length:', buffer.byteLength);
@@ -369,16 +323,19 @@ async function handleWebMRemux(m) {
 
     if (result !== 0) throw new Error('FFmpeg remux 执行失败，请检查 WebM 文件格式');
 
-    sendProgress(90, outputName, '准备下载...');
+    sendProgress(95, outputName, '正在暂存导出文件...');
     const outData = ffmpeg.FS('readFile', 'output.mp4');
-    const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
+
+    // Save FFmpeg output to IDB; popup will write to disk via FileSystemFileHandle
+    // (only popup has the user-activation context for createWritable()).
+    await saveRemuxOutput(outData.buffer);
 
     chrome.runtime.sendMessage({
       type: 'FFMPEG_COMPLETE',
-      blobUrl,
       filename: mp4Name,
       url: outputName,
       isRemux: true,
+      useIDBOutput: true, // Signal to popup to read from IDB
     }).catch(() => {});
   } catch (e) {
     const detail = `${e.name || 'Error'}: ${e.message || String(e)}`;
@@ -411,7 +368,7 @@ async function handleAudioExtract(m) {
   let ffmpeg = null;
   try {
     sendProgress(5, outputName, '读取录制文件...');
-    const buffer = await _retrieveRemuxBytes();
+    const buffer = await loadRemuxInput();
     if (!buffer) throw new Error('IDB 中未找到录制数据，请重试录制');
 
     logger.info('[AudioExtract] IDB read success, bytes length:', buffer.byteLength);
@@ -436,15 +393,17 @@ async function handleAudioExtract(m) {
 
     if (result !== 0) throw new Error('FFmpeg 音频提取失败，请检查录制文件格式');
 
-    sendProgress(90, outputName, '准备下载...');
+    sendProgress(95, outputName, '正在暂存音频文件...');
     const outData = ffmpeg.FS('readFile', 'output.mp3');
-    const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'audio/mpeg' }));
+
+    await saveRemuxOutput(outData.buffer);
+
     chrome.runtime.sendMessage({
       type: 'FFMPEG_COMPLETE',
-      blobUrl,
       filename: mp3Name,
       url: outputName,
       isAudioExtract: true,
+      useIDBOutput: true,
     }).catch(() => {});
   } catch (e) {
     const detail = `${e.name || 'Error'}: ${e.message || String(e)}`;
