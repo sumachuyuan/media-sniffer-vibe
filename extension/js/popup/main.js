@@ -37,6 +37,7 @@ let state = {
     mergingStage: '',
     ua: navigator.userAgent,
     concurrency: 3, // Default
+    lastRecordIsAudioOnly: false,
     recordFileHandle: null,  // retained after recording for remux
     recordFilename: null,
     recordingStartTime: null,
@@ -101,6 +102,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('clearBtn').onclick = () => {
         if (state.mergingUrl) chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE', url: state.mergingUrl });
         resetUI();
+        
+        // Phase 8.4: Global Reset
+        // 1. Clear UI state
+        state.recordFilename = null;
+        const statsEl = document.getElementById('record-stats');
+        if (statsEl) statsEl.style.display = 'none';
+        
+        const stopBtnEl = document.getElementById('record-stop-btn');
+        const saveVideoBtnEl = document.getElementById('record-save-video-btn');
+        const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+        if (stopBtnEl) stopBtnEl.style.display = ''; // restore default stop btn (disabled)
+        if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
+        if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
+
+        // 2. Clear persistence
+        chrome.storage.local.set({ recordingState: { isRecording: false, isReady: false } }).catch(() => {});
+        
+        // 3. Clear IndexedDB storage in offscreen
+        chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' });
+
         chrome.runtime.sendMessage({ type: 'CLEAR_URLS' }, () => {
             ui.showToast(t('toastListCleared'));
             renderUrls();
@@ -156,13 +177,37 @@ document.addEventListener('DOMContentLoaded', async () => {
       const on = audioOnlyEl.checked;
       if (qualityEl) qualityEl.style.display = on ? 'none' : '';
       if (macosNotice) macosNotice.style.display = (on || !_isMacOS) ? 'none' : 'block';
+      // Store user preference for NEXT recording
+      chrome.storage.local.set({ 'recordAudioOnlyPref': on }).catch(() => {});
     });
 
     startBtn.onclick = async () => {
+      if (startBtn.disabled) return;
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.4';
+      if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
+      if (audioOnlyEl) audioOnlyEl.disabled = true;
+      
+      // Phase 8.4: Reset UI elements from previous recording session
+      if (saveVideoBtn) saveVideoBtn.style.display = 'none';
+      if (extractAudioBtn) extractAudioBtn.style.display = 'none';
+      if (stopBtn) {
+        stopBtn.style.display = 'inline-block';
+        stopBtn.disabled = true;
+        stopBtn.style.cursor = 'not-allowed';
+      }
+      if (statsEl) {
+        statsEl.style.display = 'block';
+        statsEl.innerHTML = `<span style="color:#00e676">${t('recordWaitingStats')}</span>`;
+      }
+
       // Step 1: Get the active tab ID for tabCapture.
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const tabId = tabs[0]?.id;
       if (!tabId) {
+        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+        if (audioOnlyEl) audioOnlyEl.disabled = false;
         statsEl.style.display = 'block';
         statsEl.innerHTML = `<span style="color:#f44">${t('recordErrorTab')}</span>`;
         return;
@@ -175,13 +220,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!resp?.streamId) throw new Error(resp?.error || t('recordErrorStreamId'));
         streamId = resp.streamId;
       } catch (err) {
+        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+        if (audioOnlyEl) audioOnlyEl.disabled = false;
         statsEl.style.display = 'block';
         statsEl.innerHTML = `<span style="color:#f44">${t('error')}: ${err.message}</span>`;
         return;
       }
 
-      // Step 3: Show save file picker (must happen after awaits — still within user gesture context
-      // for Chrome extension popup pages, which retain activation across async calls).
+      // Step 3: Show save file picker
       let fileHandle;
       try {
         const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
@@ -190,6 +237,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
         });
       } catch (err) {
+        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+        if (audioOnlyEl) audioOnlyEl.disabled = false;
         if (err.name === 'AbortError') return; // User cancelled — no toast
         ui.showToast(`${t('error')}: ${err.message}`, 'error');
         return;
@@ -200,7 +250,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.recordFileHandle = fileHandle;
       state.recordFilename = null; // cleared until RECORD_STOPPED
       state.isAudioOnly = isAudioOnly;
-      if (audioOnlyEl) audioOnlyEl.disabled = true;
 
       // Phase 8.2: Clear any stale "ready" state before starting a new recording
       chrome.storage.local.set({ recordingState: { isRecording: true, isReady: false } }).catch(() => {});
@@ -312,10 +361,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
-            // Phase 8.2: If not recording, but a result is ready (e.g. popup closed after stop)
+            // Phase 8.2 & 8.5: If not recording, but a result is ready (e.g. popup closed after stop)
             if (rs?.isReady && rs.filename) {
                 state.recordFilename = rs.filename;
-                state.isAudioOnly = !!rs.isAudioOnly;
+                state.lastRecordIsAudioOnly = !!rs.isAudioOnly;
 
                 if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
                 if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
@@ -323,7 +372,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 if (stopBtn) stopBtn.style.display = 'none';
                 if (saveVideoBtn) {
-                    saveVideoBtn.style.display = state.isAudioOnly ? 'none' : 'inline-block';
+                    saveVideoBtn.style.display = state.lastRecordIsAudioOnly ? 'none' : 'inline-block';
                     saveVideoBtn.disabled = false;
                     saveVideoBtn.style.opacity = '1';
                     saveVideoBtn.style.cursor = 'pointer';
@@ -334,16 +383,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                     extractAudioBtn.style.opacity = '1';
                     extractAudioBtn.style.cursor = 'pointer';
                 }
-                if (audioOnlyEl) {
-                    audioOnlyEl.checked = !!rs.isAudioOnly;
-                    audioOnlyEl.disabled = false; // allow switching for next time
-                }
                 if (statsEl) {
                     statsEl.style.display = 'block';
                     const tsMessage = rs.stoppedAt ? `<br><span style="color:#555;font-size:10px;">${new Date(rs.stoppedAt).toLocaleTimeString()}</span>` : '';
                     statsEl.innerHTML = `<span style="color:#29b6f6">${t('recordFileWritten', [rs.filename])}</span>` +
                                        `<br><span style="color:#ffa726">${t('recordDataReady')}</span>` + tsMessage;
                 }
+            }
+        });
+        
+        // Phase 8.5: Independently restore the toggle preference for NEXT recording
+        chrome.storage.local.get('recordAudioOnlyPref', (res) => {
+            const on = !!res?.recordAudioOnlyPref;
+            if (audioOnlyEl) {
+                audioOnlyEl.checked = on;
+                if (qualityEl) qualityEl.style.display = on ? 'none' : '';
+                if (macosNotice) macosNotice.style.display = (on || !_isMacOS) ? 'none' : 'block';
             }
         });
     });
@@ -673,6 +728,8 @@ function handleRuntimeMessages(m) {
       const dotEl           = document.getElementById('record-indicator');
       const saveVideoBtnEl  = document.getElementById('record-save-video-btn');
       const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+      const audioOnlyEl     = document.getElementById('record-audio-only');
+      if (statsEl) statsEl.innerHTML =
         `<br><span style="color:#29b6f6">${t('recordFileWritten', [m.filename || '—'])}</span>` +
         `<br><span style="color:#ff5252">${t('recordStoppedTotal', [m.totalFrames])}</span>` +
         `<br><span style="color:#ffa726">${t('recordWaitingWrite')}</span>`;
@@ -680,10 +737,12 @@ function handleRuntimeMessages(m) {
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
       if (dotEl)    { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
       if (m.filename) state.recordFilename = m.filename;
+      state.lastRecordIsAudioOnly = !!m.isAudioOnly;
+
       // Phase 8: swap stop button for export buttons (disabled until IDB write completes)
       if (stopBtnEl) stopBtnEl.style.display = 'none';
       if (saveVideoBtnEl) {
-        saveVideoBtnEl.style.display = state.isAudioOnly ? 'none' : 'inline-block';
+        saveVideoBtnEl.style.display = state.lastRecordIsAudioOnly ? 'none' : 'inline-block';
         saveVideoBtnEl.disabled = true;
         saveVideoBtnEl.style.opacity = '0.3';
         saveVideoBtnEl.style.cursor = 'not-allowed';
@@ -694,7 +753,11 @@ function handleRuntimeMessages(m) {
         extractAudioBtnEl.style.opacity = '0.3';
         extractAudioBtnEl.style.cursor = 'not-allowed';
       }
-      if (audioOnlyEl) audioOnlyEl.disabled = false;
+      if (audioOnlyEl) {
+        // Do NOT overwrite audioOnlyEl.checked based on result mode!
+        // The toggle should remain at user's desired preference for NEXT and stay interactive.
+        audioOnlyEl.disabled = false; 
+      }
       return;
     }
     if (m.type === 'RECORD_BLOB_READY') {
@@ -727,6 +790,7 @@ function handleRuntimeMessages(m) {
       const dotEl     = document.getElementById('record-indicator');
       const saveVideoBtnEl    = document.getElementById('record-save-video-btn');
       const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+      const audioOnlyEl       = document.getElementById('record-audio-only');
       if (statsEl) { statsEl.style.display = 'block'; statsEl.innerHTML = `<span style="color:#ff5252">${t('error')}: ${m.error}</span>`; }
       if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
       // Restore stop btn, hide export buttons

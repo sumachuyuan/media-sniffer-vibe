@@ -105,6 +105,7 @@ let audioReader = null;
 let isRunning = false;
 let frameIndex = 0;
 let wakeLock = null;
+let _isAudioOnly = false;
 
 // ---------------------------------------------------------------------------
 // Main lifecycle
@@ -121,6 +122,7 @@ async function startTest({ streamId, quality, isAudioOnly = false }) {
   if (isRunning) { logger.warn(`${COMPONENT} Already running`); return; }
   isRunning = true;
   frameIndex = 0;
+  _isAudioOnly = !!isAudioOnly;
 
   // Retrieve FileSystemFileHandle from IndexedDB (stored by popup before sending this message).
   let fileHandle;
@@ -162,6 +164,7 @@ async function startTest({ streamId, quality, isAudioOnly = false }) {
         type: 'RECORD_STOPPED',
         totalFrames: frameIndex,
         filename,
+        isAudioOnly: _isAudioOnly,
       }).catch(() => {});
       setTimeout(() => { if (worker) { worker.terminate(); worker = null; } }, 100);
 

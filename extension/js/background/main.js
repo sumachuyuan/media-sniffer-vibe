@@ -237,6 +237,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (type === 'CLEAR_RECORD_STORAGE') {
+    // Phase 8.4: Forward IDB clear request to the persistent record offscreen
+    dispatchToRecordOffscreen({ type: 'CLEAR_RECORD_IDB' });
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (type === 'GET_SEGMENTS') {
     logger.info(`GET_SEGMENTS requested for: ${request.url}`);
     if (request.url.includes('.m3u8')) parseHlsSegments(request.url).then(res => {
