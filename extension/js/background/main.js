@@ -13,6 +13,7 @@ import {
   handleFfmpegMerge, handleProxyDownload, handleFfmpegRemux,
   handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch,
   dispatchToRecordOffscreen, handleRecordOffscreenReady, closeRecordOffscreen,
+  getIsRecordActive,
 } from './orchestrator.js';
 
 // --- Helper: Add Media to Storage ---
@@ -357,6 +358,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Offscreen is already open — send directly
     chrome.runtime.sendMessage({ type: 'STOP_RECORD_TEST' }).catch(() => {});
     sendResponse({ status: 'dispatched' });
+  }
+
+  if (type === 'GET_RECORD_STATUS') {
+    // Popup uses this for self-healing: if the background flag says no recording
+    // is active, but storage still has isRecording:true (e.g. after a crash),
+    // the popup can reset the stale state without user interaction.
+    sendResponse({ isRecordActive: getIsRecordActive() });
   }
 
   if (type === 'RECORD_OFFSCREEN_READY') {

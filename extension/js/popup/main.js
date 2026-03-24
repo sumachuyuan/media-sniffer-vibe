@@ -228,27 +228,40 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    // Phase 6: Reconnect — restore UI if recording was active when popup was closed/reopened
-    chrome.storage.local.get('recordingState', (result) => {
-        const rs = result?.recordingState;
-        if (!rs?.isRecording) return;
-        // Recording is in progress — restore UI to active state
-        if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
-        if (stopBtn) {
-            stopBtn.disabled = false;
-            stopBtn.style.cursor = 'pointer';
-            stopBtn.style.color = '#ff5252';
-            stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
-            stopBtn.style.background = 'rgba(255,60,60,0.08)';
-        }
-        if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-        if (dotEl) { dotEl.style.background = '#ff5252'; dotEl.style.boxShadow = '0 0 6px #ff5252'; }
-        if (statsEl) {
-            statsEl.style.display = 'block';
-            statsEl.innerHTML = `<span style="color:#ff5252">⬤ 录制中…</span>&nbsp;&nbsp;<span style="color:#555">${rs.quality || ''}</span>`;
-        }
-        // Start local timer ticking from persisted startTime
-        if (rs.startTime) startRecordingTimer(rs.startTime);
+    // Phase 6: Reconnect — restore UI if recording was active when popup was closed/reopened.
+    // Self-healing: ask the background whether the record offscreen is actually alive before
+    // trusting the persisted isRecording flag. If the background reports no active recording
+    // but storage still says true (crash / race), reset the stale flag immediately.
+    chrome.runtime.sendMessage({ type: 'GET_RECORD_STATUS' }, (statusResp) => {
+        const backendActive = statusResp?.isRecordActive ?? false;
+        chrome.storage.local.get('recordingState', (result) => {
+            const rs = result?.recordingState;
+            if (!rs?.isRecording) return;
+
+            if (!backendActive) {
+                // Stale state detected — background has no live recording offscreen.
+                chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
+                return;
+            }
+
+            // Recording is genuinely in progress — restore UI to active state
+            if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
+            if (stopBtn) {
+                stopBtn.disabled = false;
+                stopBtn.style.cursor = 'pointer';
+                stopBtn.style.color = '#ff5252';
+                stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
+                stopBtn.style.background = 'rgba(255,60,60,0.08)';
+            }
+            if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
+            if (dotEl) { dotEl.style.background = '#ff5252'; dotEl.style.boxShadow = '0 0 6px #ff5252'; }
+            if (statsEl) {
+                statsEl.style.display = 'block';
+                statsEl.innerHTML = `<span style="color:#ff5252">⬤ 录制中…</span>&nbsp;&nbsp;<span style="color:#555">${rs.quality || ''}</span>`;
+            }
+            // Start local timer ticking from persisted startTime
+            if (rs.startTime) startRecordingTimer(rs.startTime);
+        });
     });
 
     chrome.runtime.onMessage.addListener(handleRuntimeMessages);

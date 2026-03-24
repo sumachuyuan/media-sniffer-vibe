@@ -206,6 +206,14 @@ export function handleRecordOffscreenReady() {
 }
 
 /**
+ * Returns true only when the record offscreen is genuinely alive.
+ * Used by the GET_RECORD_STATUS handler for popup self-healing.
+ */
+export function getIsRecordActive() {
+  return isRecordOffscreenActive;
+}
+
+/**
  * Closes the record offscreen document and resets state.
  */
 export async function closeRecordOffscreen() {
