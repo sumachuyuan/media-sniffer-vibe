@@ -1,7 +1,7 @@
 /**
  * Sovereign Orchestrator - FFmpeg & Offscreen Management
  */
-import { logger } from '../common/logger.js';
+import { logger, DEBUG } from '../common/logger.js';
 
 // Command to dispatch to the FFmpeg offscreen document once it signals ready.
 let pendingOffscreenCommand = null;
@@ -59,6 +59,36 @@ export async function clearDnrRules() {
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: ruleIdsToRemove });
     logger.info('DNR Rules cleared.');
   }
+}
+
+export async function closeRecordOffscreen() {
+  if (await chrome.offscreen.hasDocument()) {
+    if (_activeOffscreenType === 'record') {
+      await chrome.offscreen.closeDocument().catch(() => {});
+    }
+  }
+  isRecordOffscreenActive = false;
+  _activeOffscreenType = null;
+  pendingRecordCommand = null;
+  logger.info('Record offscreen state reset');
+}
+
+export async function closeAnyOffscreen() {
+  if (await chrome.offscreen.hasDocument()) {
+    if (typeof DEBUG !== 'undefined' && DEBUG) {
+      logger.info('DEBUG mode is ON: [Orchestrator] Logic reset, keeping offscreen document alive.');
+      // Force reset isRunning state inside the offscreen page if it's still there
+      chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' }).catch(() => {});
+    } else {
+      await chrome.offscreen.closeDocument().catch(() => {});
+    }
+  }
+  isRecordOffscreenActive = false;
+  _isFfmpegBusy = false;
+  _activeOffscreenType = null;
+  pendingOffscreenCommand = null;
+  pendingRecordCommand = null;
+  logger.info('Global Offscreen state reset');
 }
 
 export async function createOffscreen() {
@@ -122,8 +152,8 @@ async function dispatchToOffscreen(command) {
     chrome.runtime.sendMessage({
       type: 'FFMPEG_ERROR',
       error: chrome.i18n.getMessage('ffmpegBusy'),
-      isRemux: command.type === 'WEBM_REMUX',
-      isAudioExtract: command.type === 'AUDIO_EXTRACT',
+      isRemux: command.type === 'START_WEBM_REMUX',
+      isAudioExtract: command.type === 'START_AUDIO_EXTRACT',
     }).catch(() => {});
     return;
   }
@@ -179,21 +209,21 @@ export function handleFfmpegDone() {
 export function handleFfmpegRemux(data) {
   // fileHandle is retrieved from IndexedDB inside the offscreen document.
   return dispatchToOffscreen({
-    type: 'WEBM_REMUX',
+    type: 'START_WEBM_REMUX',
     outputName: data.outputName,
   });
 }
 
 export function handleAudioExtract(data) {
   return dispatchToOffscreen({
-    type: 'AUDIO_EXTRACT',
+    type: 'START_AUDIO_EXTRACT',
     outputName: data.outputName,
   });
 }
 
 export function handleOffscreenReady() {
   if (!pendingOffscreenCommand) return;
-  chrome.runtime.sendMessage(pendingOffscreenCommand).catch(() => {});
+  chrome.runtime.sendMessage({ ...pendingOffscreenCommand, _isBackgroundProxy: true }).catch(() => {});
   pendingOffscreenCommand = null;
 }
 
@@ -230,12 +260,31 @@ export async function createRecordOffscreen() {
  */
 export async function dispatchToRecordOffscreen(command) {
   try {
-    if (await chrome.offscreen.hasDocument()) {
-      if (!isRecordOffscreenActive) {
-        logger.warn('Offscreen exists but is not the record offscreen — ignoring');
-        return;
+    // Phase 4: obtain a tabCapture stream ID so the offscreen document can call getUserMedia.
+    if (command.type === 'START_RECORD_TEST') {
+      // Handled by popup directly. Background broadcast here was causing async races.
+    }
+    const hasDoc = await chrome.offscreen.hasDocument();
+    if (hasDoc) {
+      // If a document exists, but our internal type is null, it's a desync. Try to heal it.
+      if (!_activeOffscreenType) {
+        logger.warn('offscreen exists but type is NULL. Assuming legacy or stale record offscreen.');
       }
-      chrome.runtime.sendMessage(command).catch(err => logger.error('Record offscreen command failed', err));
+      
+      if (_activeOffscreenType === 'record' || (!_activeOffscreenType && command.type === 'START_RECORD_TEST')) {
+        // Reuse or heal state to 'record'
+        _activeOffscreenType = 'record';
+        isRecordOffscreenActive = true;
+        chrome.runtime.sendMessage({ ...command, _isBackgroundProxy: true }).catch(err => logger.error('Record offscreen command failed', err));
+      } else {
+        // Conflicts with another type (e.g. 'ffmpeg')
+        logger.warn(`dispatchToRecordOffscreen: Type conflict (Current: ${_activeOffscreenType}), force-recreating.`);
+        await chrome.offscreen.closeDocument().catch(() => {});
+        _activeOffscreenType = null;
+        isRecordOffscreenActive = false;
+        pendingRecordCommand = command;
+        await createRecordOffscreen();
+      }
     } else {
       pendingRecordCommand = command;
       await createRecordOffscreen();
@@ -261,15 +310,4 @@ export function handleRecordOffscreenReady() {
  */
 export function getIsRecordActive() {
   return isRecordOffscreenActive;
-}
-
-/**
- * Closes the record offscreen document and resets state.
- */
-export async function closeRecordOffscreen() {
-  isRecordOffscreenActive = false;
-  _activeOffscreenType = null;
-  pendingRecordCommand = null;
-  await chrome.offscreen.closeDocument().catch(() => {});
-  logger.info('Record offscreen closed');
 }

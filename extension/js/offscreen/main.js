@@ -44,8 +44,18 @@ async function handleMerge(m) {
     ffmpeg = await initFFmpeg(true);
     cleanupFS(ffmpeg);
 
+    // AUDIT: Clear old files to prevent stale FS state
+    ['iv.mp4', 'ia.mp4', 'final.mp4', 'final.mkv'].forEach(f => {
+      try { ffmpeg.FS('unlink', f); } catch (e) { /* ignore */ }
+    });
+
     ffmpeg.FS('writeFile', 'iv.mp4', new Uint8Array(await vBlob.arrayBuffer()));
     ffmpeg.FS('writeFile', 'ia.mp4', new Uint8Array(await aBlob.arrayBuffer()));
+
+    // AUDIT: Mandatory manual unlink to prevent FS locks or stale state on first run
+    ['input.webm', 'output.mp3', 'output.mp4'].forEach(f => {
+      try { ffmpeg.FS('unlink', f); } catch (e) { /* silent */ }
+    });
 
     if (isCancelled) throw new Error('CANCELLED');
     sendProgress(70, progressUrl, t('merging'), itemId);
@@ -316,7 +326,10 @@ async function handleWebMRemux(m) {
     const result = await runFFmpeg(ffmpeg, [
       '-y', '-nostdin',
       '-i', 'input.webm',
-      '-c', 'copy',
+      '-map', '0',
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-strict', '-2',
       '-movflags', '+faststart',
       'output.mp4',
     ]);
@@ -329,6 +342,7 @@ async function handleWebMRemux(m) {
     // Save FFmpeg output to IDB; popup will write to disk via FileSystemFileHandle
     // (only popup has the user-activation context for createWritable()).
     await saveRemuxOutput(outData.buffer);
+    sendProgress(100, outputName, '导出完成，正在准备回写...');
 
     chrome.runtime.sendMessage({
       type: 'FFMPEG_COMPLETE',
@@ -397,6 +411,7 @@ async function handleAudioExtract(m) {
     const outData = ffmpeg.FS('readFile', 'output.mp3');
 
     await saveRemuxOutput(outData.buffer);
+    sendProgress(100, outputName, '提取完成，正在准备回写...');
 
     chrome.runtime.sendMessage({
       type: 'FFMPEG_COMPLETE',
@@ -424,8 +439,8 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'FFMPEG_MERGE') handleMerge(m);
   if (m.type === 'FFMPEG_MERGE_SEGMENTS') handleMergeSegments(m);
   if (m.type === 'START_PROXY_DOWNLOAD') handleProxyDownload(m);
-  if (m.type === 'WEBM_REMUX') handleWebMRemux(m);
-  if (m.type === 'AUDIO_EXTRACT') handleAudioExtract(m);
+  if (m.type === 'START_WEBM_REMUX') handleWebMRemux(m);
+  if (m.type === 'START_AUDIO_EXTRACT') handleAudioExtract(m);
   if (m.type === 'CANCEL_FFMPEG_MERGE') isCancelled = true;
 });
 

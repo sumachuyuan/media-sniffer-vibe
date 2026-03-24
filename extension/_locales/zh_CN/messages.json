@@ -286,6 +286,9 @@
   "recordDataReady": {
     "message": "✅ 数据已就绪，请选择导出格式"
   },
+  "recordWaitingStats": {
+    "message": "⌛ 正在等待录制流数据..."
+  },
   "ffmpegBusy": {
     "message": "系统忙，请等待其他下载任务完成"
   }

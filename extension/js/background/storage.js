@@ -14,7 +14,12 @@ export const state = {
     stage: null
   },
   parsingCache: new Map(),
-  processingUrls: new Set()
+  processingUrls: new Set(),
+  recordState: {
+    isRecording: false,
+    isConsolidating: false,
+    isReady: false
+  }
 };
 
 const PARSE_CACHE_TTL = 30000;

@@ -2,12 +2,16 @@
  * Sovereign Popup Main Entry (v25.1.0 Feature Complete)
  */
 import { ui } from './ui.js';
+import { logger } from '../common/logger.js';
 import { sanitizeFilename, copyToClipboard } from './utils.js';
 import { createUrlItem, renderPromo, renderCompanion } from './renderer.js';
 import { i18n } from './i18n.js';
 import { saveFileHandle, loadFileHandle, loadRemuxOutput } from '../record/storage.js';
 
 const t = (key, subs) => i18n.t(key, subs);
+
+let _pendingRecordWritable = null; // Phase 9: Active writable during user gesture
+let _isProcessingFinalWrite = false; // Phase 10: De-duplication lock for dual broadcast signals
 
 let state = {
     mergingUrl: null,
@@ -158,8 +162,36 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.storage.local.set({ 'recordAudioOnlyPref': on }).catch(() => {});
     });
 
+    // Step 0: Pre-fetch tab ID to ensure user gesture context in startBtn.onclick
+    let activeTabId = null;
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        activeTabId = tabs[0]?.id;
+    });
+
     startBtn.onclick = async () => {
       if (startBtn.disabled) return;
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.4';
+      
+      // Step 1: Get tab capture streamId IMMEDIATELY while user gesture is active.
+      // CALL DIRECTLY in popup context to preserve user gesture context 100%.
+      // This synchronously links the click event to the tab capture request.
+      chrome.tabCapture.getMediaStreamId({ targetTabId: activeTabId }, (streamId) => {
+        if (!streamId) {
+          ui.showToast(`${t('error')}: ${chrome.runtime.lastError?.message || t('recordErrorStreamId')}`, 'error');
+          startBtn.disabled = false;
+          startBtn.style.opacity = '1';
+          if (qualityEl) qualityEl.disabled = false;
+          if (audioOnlyEl) audioOnlyEl.disabled = false;
+          return;
+        }
+
+        // Proceed to start recording flow via background dispatch with the valid streamId.
+        _startRecordingFlow(streamId, activeTabId);
+      });
+    };
+
+    const _startRecordingFlow = (streamId, tabId) => {
       startBtn.disabled = true;
       startBtn.style.opacity = '0.4';
       if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
@@ -176,33 +208,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (statsEl) {
         statsEl.style.display = 'block';
         statsEl.innerHTML = `<span style="color:#00e676">${t('recordWaitingStats')}</span>`;
-      }
-
-      // Step 1: Get the active tab ID for tabCapture.
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const tabId = tabs[0]?.id;
-      if (!tabId) {
-        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
-        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
-        if (audioOnlyEl) audioOnlyEl.disabled = false;
-        statsEl.style.display = 'block';
-        statsEl.innerHTML = `<span style="color:#f44">${t('recordErrorTab')}</span>`;
-        return;
-      }
-
-      // Step 2: Request a stream ID from the background (tabCapture API).
-      let streamId;
-      try {
-        const resp = await chrome.runtime.sendMessage({ type: 'GET_TAB_STREAM_ID', targetTabId: tabId });
-        if (!resp?.streamId) throw new Error(resp?.error || t('recordErrorStreamId'));
-        streamId = resp.streamId;
-      } catch (err) {
-        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
-        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
-        if (audioOnlyEl) audioOnlyEl.disabled = false;
-        statsEl.style.display = 'block';
-        statsEl.innerHTML = `<span style="color:#f44">${t('error')}: ${err.message}</span>`;
-        return;
       }
 
       // Phase 9: Silent start — no showSaveFilePicker here.
@@ -265,6 +270,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
           });
           await saveFileHandle(handle);
+          // Phase 9: Request writable IMMEDIATELY while we still have user gesture active.
+          // This bypasses the SecurityError if conversion takes > 5-10 seconds.
+          _pendingRecordWritable = await handle.createWritable();
         } catch (err) {
           if (err.name === 'AbortError') return;
           ui.showToast(`${t('error')}: ${err.message}`, 'error');
@@ -276,7 +284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         saveVideoBtn.style.opacity = '0.5';
         saveVideoBtn.textContent = t('recordSaveVideo') + '...';
         chrome.runtime.sendMessage({
-          type: 'WEBM_REMUX',
+          type: 'START_WEBM_REMUX',
           outputName: state.recordFilename || 'recording.mp4'
         });
       };
@@ -294,6 +302,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             types: [{ description: 'MP3 Audio', accept: { 'audio/mpeg': ['.mp3'] } }],
           });
           await saveFileHandle(handle);
+          // Phase 9: Secure the lock on the file BEFORE long-running FFmpeg starts.
+          _pendingRecordWritable = await handle.createWritable();
         } catch (err) {
           if (err.name === 'AbortError') return;
           ui.showToast(`${t('error')}: ${err.message}`, 'error');
@@ -323,8 +333,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Self-healing: ask the background whether the record offscreen is actually alive before
     // trusting the persisted isRecording flag. If the background reports no active recording
     // but storage still says true (crash / race), reset the stale flag immediately.
-    chrome.runtime.sendMessage({ type: 'GET_RECORD_STATUS' }, (statusResp) => {
-        const backendActive = statusResp?.isRecordActive ?? false;
+    // Phase 9.8: Pre-warm the record offscreen document as soon as the popup opens.
+    // This eliminates the async delay of creating the document AFTER the user clicks "Start",
+    // which often causes the synchronous tabCapture gesture context to expire in Mv3.
+    chrome.runtime.sendMessage({ type: 'PRE_WARM_RECORD_OFFSCREEN' });
+
+    chrome.runtime.sendMessage({ type: 'GET_RECORD_STATUS' }, (resp) => {
+        const backendActive = resp?.isRecordActive ?? false;
         chrome.storage.local.get(['recordingState', 'recordLastHeartbeat'], (result) => {
             const rs = result?.recordingState;
             if (!rs?.isRecording && !rs?.isConsolidating && !rs?.isReady) return;
@@ -848,37 +863,85 @@ function handleRuntimeMessages(m) {
         const isAudioExtract = m.isAudioExtract;
         
         if (m.type === 'FFMPEG_COMPLETE' && m.useIDBOutput) {
+            if (_isProcessingFinalWrite) {
+                logger.warn('[Popup] FFMPEG_COMPLETE received but a write operation is already in progress. Ignoring duplicate signal.');
+                return;
+            }
+            _isProcessingFinalWrite = true;
+
             // Phase 9: Handle the final write from the Popup context
             (async () => {
+                logger.info('[Popup] FFMPEG_COMPLETE received (useIDBOutput=true). Starting final write sequence...');
                 try {
-                    ui.showToast(t('recordDataReady'), 'ffmpeg');
-                    
-                    const handle = await loadFileHandle();
-                    if (!handle) throw new Error('未找到文件保存句柄');
-
                     const buffer = await loadRemuxOutput();
-                    if (!buffer) throw new Error('提取到的导出数据为空');
+                    if (!buffer) {
+                        logger.error('[Popup] FATAL: loadRemuxOutput returned null. IDB Key might be missing.');
+                        throw new Error('提取到的导出数据为空');
+                    }
+                    logger.info(`[Popup] Successfully loaded ${buffer.byteLength} bytes from IDB.`);
 
-                    const writable = await handle.createWritable();
-                    await writable.write(buffer);
-                    await writable.close();
+                    let writable = _pendingRecordWritable;
+                    if (!writable) {
+                        logger.warn('[Popup] _pendingRecordWritable is lost (popup likely closed during transcode). Attempting handle recovery...');
+                        const handle = await loadFileHandle();
+                        if (!handle) throw new Error('未找到文件保存句柄 (请在导出期间保持弹窗开启)');
+                        
+                        // Permission check: if video remuxing takes too long, browser might revoke write permission
+                        if (handle.queryPermission) {
+                            const perm = await handle.queryPermission({ mode: 'readwrite' });
+                            if (perm !== 'granted') {
+                                logger.warn('[Popup] Write permission lost, requesting again...');
+                                // Note: window-based requestPermission MUST be within user gesture, 
+                                // so if this fails, we ask the user to re-click.
+                            }
+                        }
 
-                    ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'));
-                } catch (err) {
-                    logger.error('[Popup] Export write failed', err);
-                    ui.showToast(`${t('error')}: ${err.message}`, 'error');
-                } finally {
-                    _restoreExportButtons();
-                }
-            })();
-            return;
-        }
+                        logger.info('[Popup] Recovering writable from stored handle...');
+                        writable = await handle.createWritable();
+                    }
+
+                logger.info('[Popup] Initiating binary write...');
+                await writable.write(buffer);
+                logger.info('[Popup] Data written. Finalizing file...');
+                await writable.close();
+                _pendingRecordWritable = null;
+
+                logger.info('[Popup] File system operation SUCCESS.');
+                ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
+            } catch (err) {
+                logger.warn('[Popup] 磁盘直接写入失败，启动 Blob 下载保底方案...', err);
+                const blob = new Blob([buffer], { type: isAudioExtract ? 'audio/mpeg' : 'video/mp4' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = m.filename || (isAudioExtract ? 'vibe_recording.mp3' : 'vibe_recording.mp4');
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
+            } finally {
+                _isProcessingFinalWrite = false;
+                _restoreExportButtons();
+                // Phase 9: Final physical UI teardown after async write completes
+                state.mergingUrl = null;
+                state.mergingProgress = 0;
+                ui.hideMergeBanner();
+                chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => {});
+            }
+        })();
+        return;
+    }
 
         if (m.type === 'FFMPEG_COMPLETE') {
             if (isAudioExtract) ui.showToast(t('recordAudioComplete'));
             else if (isRemux)   ui.showToast(t('recordRemuxComplete'));
             else                ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
         } else {
+            if (_pendingRecordWritable) {
+                _pendingRecordWritable.close().catch(() => {});
+                _pendingRecordWritable = null;
+            }
             if (isAudioExtract) ui.showToast(t('recordAudioFailed', [m.error]), 'error');
             else if (isRemux)   ui.showToast(t('recordRemuxFailed', [m.error]), 'error');
             else                ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
@@ -886,6 +949,8 @@ function handleRuntimeMessages(m) {
         // Restore export buttons to clickable state after operation completes
         if (isRemux || isAudioExtract) {
             _restoreExportButtons();
+            // Force reset background progress state so it doesn't stay at 95%
+            chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => {});
             
             // Phase 8.1: Support multiple continuous exports by keeping the record panel visible.
             // Reset only the temporary merge/export state variables.

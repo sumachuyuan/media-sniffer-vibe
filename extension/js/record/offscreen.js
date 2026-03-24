@@ -43,12 +43,13 @@ let _heartbeatInterval = null;
  * @param {string}  filename    Phase 9: temporary filename for metrics/logging.
  */
 async function startTest({ streamId, quality, isAudioOnly = false, filename = 'recording.webm' }) {
-  // Guard must be set synchronously before any await to prevent re-entrant calls.
-  // Two START_RECORD_TEST messages arriving in quick succession would both pass a
-  // post-await check because JS awaits yield control before isRunning is written.
-  if (isRunning) { logger.warn(`${COMPONENT} Already running`); return; }
+  if (isRunning) {
+    logger.warn(`${COMPONENT} startTest rejected: Capture is already running.`);
+    return;
+  }
   isRunning = true;
 
+  // Guard must be set synchronously before any await to prevent re-entrant calls.
   await clearSession().catch(() => {});
   frameIndex = 0;
   _isAudioOnly = !!isAudioOnly;
@@ -125,7 +126,7 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     logger.error(`${COMPONENT} ${err}`);
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
     isRunning = false;
-    worker.terminate(); worker = null;
+    worker?.terminate(); worker = null;
     return;
   }
 
@@ -133,34 +134,41 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     const err = 'MediaStreamTrackProcessor unavailable (Chrome 94+ required)';
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
     isRunning = false;
-    worker.terminate(); worker = null;
+    worker?.terminate(); worker = null;
     return;
   }
 
   try {
+    // Phase 9.4: Static Tab Capture Constraints (Mv3 Standard)
+    // IMPORTANT: Including 'displaySurface' or 'mandatory' in an Offscreen document 
+    // will trigger a system-level picker prompt, which is auto-rejected (Permission dismissed).
+    const W_MAP = { 'UHD': 3840, '1080P': 1920, '720P': 1280 };
+    const H_MAP = { 'UHD': 2160, '1080P': 1080, '720P': 720 };
+    const targetW = W_MAP[quality] || 1920;
+    const targetH = H_MAP[quality] || 1080;
+
     const constraints = {
+      video: isAudioOnly ? false : {
+        mandatory: {
+          chromeMediaSource: 'tab',
+          chromeMediaSourceId: streamId,
+          minWidth: targetW, minHeight: targetH,
+          maxWidth: targetW, maxHeight: targetH,
+        }
+      },
       audio: {
         mandatory: {
           chromeMediaSource: 'tab',
           chromeMediaSourceId: streamId,
-        },
+        }
       },
-      // Phase 8: skip video track when audio-only mode is selected
-      ...(!isAudioOnly && {
-        video: {
-          mandatory: {
-            chromeMediaSource: 'tab',
-            chromeMediaSourceId: streamId,
-          },
-        },
-      }),
     };
     mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (err) {
     logger.error(`${COMPONENT} getUserMedia failed: ${err.message}`);
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: `标签页捕获失败: ${err.message}` }).catch(() => { });
     isRunning = false;
-    worker.terminate(); worker = null;
+    worker?.terminate(); worker = null;
     return;
   }
 
@@ -172,19 +180,23 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     const err = '捕获流中没有视频轨道';
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
     isRunning = false;
-    worker.terminate(); worker = null;
+    worker?.terminate(); worker = null;
     return;
   }
 
-  // Chrome tab capture MUTES the original tab — route captured audio back to
-  // the speakers via HTMLAudioElement so the user can still hear while recording.
+  // Chrome tab capture MUTES the original tab — to allow the user to hear the 
+  // audio while recording, we must route the stream back to the speakers.
   if (audioTrack) {
+    logger.info(`${COMPONENT} Audio track captured [${audioTrack.label}] — bridging to speakers`);
     try {
-      const audio = new Audio();
-      audio.srcObject = mediaStream;
-      audio.play().catch(err => logger.warn(`${COMPONENT} Audio passthrough: ${err.message}`));
+      const audioCtx = new AudioContext();
+      const source = audioCtx.createMediaStreamSource(mediaStream);
+      source.connect(audioCtx.destination);
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
     } catch (err) {
-      logger.warn(`${COMPONENT} Audio passthrough setup failed: ${err.message}`);
+      logger.warn(`${COMPONENT} Audio bridging failed: ${err.message}`);
     }
   }
 
@@ -225,7 +237,7 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     logger.error(`${COMPONENT} ${err.message}`);
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err.message }).catch(() => { });
     isRunning = false;
-    worker.terminate(); worker = null;
+    worker?.terminate(); worker = null;
     return;
   }
   logger.info(`${COMPONENT} Encoder ready: ${hwInfo.mode} (${hwInfo.codec})`);
@@ -317,6 +329,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'STOP_RECORD_TEST') {
     stopTest();
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg.type === 'CLEAR_RECORD_STORAGE') {
+    // Force reset local state if popup detects a crash via heartbeat
+    isRunning = false;
+    if (_heartbeatInterval) { clearInterval(_heartbeatInterval); _heartbeatInterval = null; }
+    if (worker) { worker.terminate(); worker = null; }
+    if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+    clearSession().catch(() => {});
     sendResponse({ ok: true });
     return true;
   }

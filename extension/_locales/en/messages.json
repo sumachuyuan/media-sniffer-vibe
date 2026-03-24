@@ -286,6 +286,9 @@
   "recordDataReady": {
     "message": "✅ Data ready, please choose export format"
   },
+  "recordWaitingStats": {
+    "message": "⌛ Waiting for recording stream data..."
+  },
   "ffmpegBusy": {
     "message": "System busy, please wait for other tasks to complete"
   }
