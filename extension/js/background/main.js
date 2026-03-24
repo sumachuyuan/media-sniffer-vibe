@@ -395,17 +395,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // in IDB. Only now is it safe to open the FFmpeg offscreen for remux.
   if (type === 'RECORD_BLOB_READY') {
     if (request.filename) {
-      state.globalMergeStatus = {
-        isMerging: true,
-        itemId: null,
-        url: request.filename,
-        title: `转封装: ${request.filename}`,
-        progress: 0,
-        stage: '准备 MP4 转封装...',
-      };
-      handleFfmpegRemux({ outputName: request.filename });
+      // Await full closure of record.html before opening the FFmpeg offscreen.
+      // Without this, chrome.offscreen.hasDocument() still returns true for
+      // record.html when dispatchToOffscreen runs, causing WEBM_REMUX to be
+      // sent to the wrong document.
+      closeRecordOffscreen().then(() => {
+        state.globalMergeStatus = {
+          isMerging: true,
+          itemId: null,
+          url: request.filename,
+          title: `转封装: ${request.filename}`,
+          progress: 0,
+          stage: '准备 MP4 转封装...',
+        };
+        handleFfmpegRemux({ outputName: request.filename });
+      });
     }
     sendResponse({ ok: true });
+    return true;
   }
 
   if (type === 'RECORD_BLOB_FAILED') {

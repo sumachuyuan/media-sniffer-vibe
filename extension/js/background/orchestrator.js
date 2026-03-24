@@ -63,6 +63,7 @@ export async function createOffscreen() {
     reasons: ['WORKERS'],
     justification: 'FFmpeg.wasm requires a DOM environment.'
   });
+  _activeOffscreenType = 'ffmpeg';
 }
 
 // Build the ready-to-send offscreen command from a merge request payload.
@@ -111,7 +112,18 @@ async function dispatchToOffscreen(command) {
 
   try {
     if (await chrome.offscreen.hasDocument()) {
-      chrome.runtime.sendMessage(command).catch(err => logger.error('Command to Offscreen failed', err));
+      if (_activeOffscreenType !== 'ffmpeg') {
+        // hasDocument() is true but we're not tracking an FFmpeg offscreen —
+        // this is a stale record.html that hasn't finished closing yet.
+        // Force-close it before creating the correct document.
+        logger.warn(`dispatchToOffscreen: unexpected offscreen type "${_activeOffscreenType}", force-closing before creating FFmpeg offscreen`);
+        _activeOffscreenType = null;
+        await chrome.offscreen.closeDocument().catch(() => {});
+        pendingOffscreenCommand = command;
+        await createOffscreen();
+      } else {
+        chrome.runtime.sendMessage(command).catch(err => logger.error('Command to Offscreen failed', err));
+      }
     } else {
       pendingOffscreenCommand = command;
       await createOffscreen();
@@ -152,6 +164,11 @@ export function handleOffscreenReady() {
   pendingOffscreenCommand = null;
 }
 
+// Tracks which type of offscreen is currently open so dispatchToOffscreen
+// can detect a stale record.html before sending FFmpeg commands.
+// 'ffmpeg' | 'record' | null
+let _activeOffscreenType = null;
+
 // ---------------------------------------------------------------------------
 // Record Offscreen Management
 // ---------------------------------------------------------------------------
@@ -166,6 +183,7 @@ export async function createRecordOffscreen() {
     return false;
   }
   isRecordOffscreenActive = true;
+  _activeOffscreenType = 'record';
   await chrome.offscreen.createDocument({
     url: 'record.html',
     reasons: ['WORKERS'],
@@ -218,6 +236,7 @@ export function getIsRecordActive() {
  */
 export async function closeRecordOffscreen() {
   isRecordOffscreenActive = false;
+  _activeOffscreenType = null;
   pendingRecordCommand = null;
   await chrome.offscreen.closeDocument().catch(() => {});
   logger.info('Record offscreen closed');
