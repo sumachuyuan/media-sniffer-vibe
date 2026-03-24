@@ -64,6 +64,7 @@ export async function createOffscreen() {
     justification: 'FFmpeg.wasm requires a DOM environment.'
   });
   _activeOffscreenType = 'ffmpeg';
+  logger.info('[Orchestrator] FFmpeg Offscreen created successfully.');
 }
 
 // Build the ready-to-send offscreen command from a merge request payload.
@@ -98,6 +99,7 @@ function buildMergeCommand(data) {
 }
 
 async function dispatchToOffscreen(command) {
+  logger.info('[Orchestrator] Dispatching command to Offscreen:', command.type);
   // Guard: record offscreen is active — sending an FFmpeg command to it would
   // be silently ignored and the user would be stuck. Fail fast instead.
   if (isRecordOffscreenActive) {

@@ -394,6 +394,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // record/offscreen.js sends RECORD_BLOB_READY after storing the WebM bytes
   // in IDB. Only now is it safe to open the FFmpeg offscreen for remux.
   if (type === 'RECORD_BLOB_READY') {
+    logger.info('[Signal] Received BLOB_READY, triggering remux...');
     if (request.filename) {
       // Await full closure of record.html before opening the FFmpeg offscreen.
       // Without this, chrome.offscreen.hasDocument() still returns true for

@@ -332,6 +332,7 @@ async function handleWebMRemux(m) {
   if (isMerging) return;
   isMerging = true;
   const { outputName } = m;
+  logger.info('[Remux] handleWebMRemux triggered. Starting IDB fetch...');
 
   let ffmpeg = null;
   try {
@@ -344,6 +345,7 @@ async function handleWebMRemux(m) {
     const buffer = await _retrieveRemuxBytes();
     if (!buffer) throw new Error('IDB 中未找到录制数据，请重试录制');
 
+    logger.info('[Remux] IDB read success, bytes length:', buffer.byteLength);
     const fileSizeMB = (buffer.byteLength / 1024 / 1024).toFixed(1);
     logger.info(`[Remux] Input: ${outputName} (${fileSizeMB} MB from IDB)`);
 
