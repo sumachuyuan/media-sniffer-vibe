@@ -382,11 +382,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
     }
 
-    if (type === 'RECORD_STOPPED') {
-      // Close the record offscreen right away — remux will be triggered later
-      // by RECORD_BLOB_READY once the record offscreen has stored file bytes in IDB.
-      closeRecordOffscreen();
-    }
+    // Do NOT close the record offscreen here. record/offscreen.js is still
+    // running _storeRemuxBytes() asynchronously. Closing now would kill that
+    // async work mid-flight. The offscreen is closed in RECORD_BLOB_READY /
+    // RECORD_BLOB_FAILED once the IDB write has completed.
 
     sendResponse({ ok: true });
   }
@@ -418,6 +417,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (type === 'RECORD_BLOB_FAILED') {
     logger.warn(`Remux blob storage failed for ${request.filename}: ${request.error}`);
+    closeRecordOffscreen();
     chrome.runtime.sendMessage({
       type: 'FFMPEG_ERROR',
       error: `录制文件读取失败，无法转封装: ${request.error}`,
