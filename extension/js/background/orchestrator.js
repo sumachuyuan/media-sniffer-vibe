@@ -324,7 +324,7 @@ export async function closeOffscreen() {
 
 export function handleRecordOffscreenReady() {
   if (!pendingRecordCommand) return;
-  chrome.runtime.sendMessage(pendingRecordCommand).catch(() => {});
+  chrome.runtime.sendMessage({ ...pendingRecordCommand, _isBackgroundProxy: true }).catch(() => {});
   pendingRecordCommand = null;
 }
 
