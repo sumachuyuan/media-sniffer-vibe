@@ -48,27 +48,88 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     return;
   }
   isRunning = true;
+  logger.info(`${COMPONENT} startTest signal received at: ${new Date().toLocaleTimeString()}`);
 
   // Guard must be set synchronously before any await to prevent re-entrant calls.
-  await clearSession().catch(() => {});
+
+  // ── Step 1: Consume the tabCapture token IMMEDIATELY ─────────────────────
+  // Chrome's tabCapture streamId TTL is ~250 ms. getUserMedia MUST be the first
+  // await in this function — before IDB cleanup, Worker spawn, or any other
+  // async work — to guarantee the token has not expired on arrival.
+  if (!streamId) {
+    const err = 'Missing streamId — cannot capture tab';
+    logger.error(`${COMPONENT} ${err}`);
+    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
+    isRunning = false;
+    return;
+  }
+
+  if (typeof MediaStreamTrackProcessor === 'undefined') {
+    const err = 'MediaStreamTrackProcessor unavailable (Chrome 94+ required)';
+    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
+    isRunning = false;
+    return;
+  }
+
+  try {
+    // Phase 9.4: Static Tab Capture Constraints (Mv3 Standard)
+    // IMPORTANT: Including 'displaySurface' or 'mandatory' in an Offscreen document
+    // will trigger a system-level picker prompt, which is auto-rejected (Permission dismissed).
+    const W_MAP = { 'UHD': 3840, '1080P': 1920, '720P': 1280 };
+    const H_MAP = { 'UHD': 2160, '1080P': 1080, '720P': 720 };
+    const targetW = W_MAP[quality] || 1920;
+    const targetH = H_MAP[quality] || 1080;
+
+    // For UHD, omit minWidth/minHeight so Chrome captures at the display's native
+    // resolution (up to 4K) rather than forcing an exact 3840×2160 constraint that
+    // can fail on non-4K displays or cause excessive GPU load / timestamp jitter.
+    const videoMandatory = {
+      chromeMediaSource: 'tab',
+      chromeMediaSourceId: streamId,
+      maxWidth: targetW,
+      maxHeight: targetH,
+      ...(quality !== 'UHD' ? { minWidth: targetW, minHeight: targetH } : {}),
+    };
+
+    const constraints = {
+      video: isAudioOnly ? false : { mandatory: videoMandatory },
+      audio: {
+        mandatory: {
+          chromeMediaSource: 'tab',
+          chromeMediaSourceId: streamId,
+        }
+      },
+    };
+    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (err) {
+    logger.error(`${COMPONENT} getUserMedia failed: ${err.message}`);
+    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: `标签页捕获失败: ${err.message}` }).catch(() => { });
+    isRunning = false;
+    return;
+  }
+
+  // ── Step 2: Token consumed — async IDB cleanup is now safe ───────────────
+  try {
+    logger.info(`${COMPONENT} [Step 2/5] Clearing previous IndexedDB session...`);
+    await clearSession().catch(e => logger.error(`${COMPONENT} clearSession failed: ${e.message}`));
+    logger.info(`${COMPONENT} [Step 2/5] IDB session cleared.`);
+  } catch (e) {
+    logger.warn(`${COMPONENT} Storage clear warning: ${e.message}`);
+  }
+
   frameIndex = 0;
   _isAudioOnly = !!isAudioOnly;
 
-  // Start heartbeat: written to chrome.storage so popup can detect crashes even
-  // if the Service Worker was suspended and restarted between the last heartbeat
-  // and the popup opening.
+  // Start heartbeat
   _heartbeatInterval = setInterval(() => {
-    // Optional chaining guards against the rare case where the offscreen document
-    // is being torn down by Chrome when this timer fires its final tick.
-    chrome?.storage?.local?.set({ recordLastHeartbeat: Date.now() })?.catch?.(() => {});
+    chrome?.storage?.local?.set({ recordLastHeartbeat: Date.now() })?.catch?.(() => { });
   }, 5000);
 
-  // Silent start — IDB-backed WritableStream; transferred to worker zero-copy
   const writable = createChunkWritableStream();
-
-  logger.info(`${COMPONENT} === Phase 9 tab-capture START [${quality}] ===`);
+  logger.info(`${COMPONENT} [Step 3/5] === Phase 9 tab-capture START [${quality}] ===`);
 
   // 1. Spawn the Record Worker
+  logger.info(`${COMPONENT} [Step 4/5] Spawning Worker...`);
   const workerUrl = chrome.runtime.getURL('js/record/worker.js');
   worker = new Worker(workerUrl);
 
@@ -88,21 +149,21 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
       // in storage without waiting for the (potentially slow) IDB write.
       logger.info(`${COMPONENT} Chunk capture complete. Consolidating IDB chunks...`);
       const filename = `vibe_recording_${Date.now()}.webm`;
-      
+
       chrome.runtime.sendMessage({
         type: 'RECORD_STOPPED',
         totalFrames: frameIndex,
         filename,
         isAudioOnly: _isAudioOnly,
-      }).catch(() => {});
+      }).catch(() => { });
       setTimeout(() => { if (worker) { worker.terminate(); worker = null; } }, 100);
 
       // Consolidate all IDB chunks into remuxInputBlob for the FFmpeg offscreen.
       consolidateChunks().then(() => {
-        chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename }).catch(() => { });
       }).catch((err) => {
         logger.warn(`${COMPONENT} Failed to consolidate IDB chunks: ${err.message}`);
-        chrome.runtime.sendMessage({ type: 'RECORD_BLOB_FAILED', filename, error: err.message }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'RECORD_BLOB_FAILED', filename, error: err.message }).catch(() => { });
       });
 
     } else if (msg.type === 'ENCODE_ERROR') {
@@ -120,58 +181,7 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: e.message }).catch(() => { });
   };
 
-  // 3. Capture the tab stream via getUserMedia (streamId from background tabCapture)
-  if (!streamId) {
-    const err = 'Missing streamId — cannot capture tab';
-    logger.error(`${COMPONENT} ${err}`);
-    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
-    isRunning = false;
-    worker?.terminate(); worker = null;
-    return;
-  }
-
-  if (typeof MediaStreamTrackProcessor === 'undefined') {
-    const err = 'MediaStreamTrackProcessor unavailable (Chrome 94+ required)';
-    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
-    isRunning = false;
-    worker?.terminate(); worker = null;
-    return;
-  }
-
-  try {
-    // Phase 9.4: Static Tab Capture Constraints (Mv3 Standard)
-    // IMPORTANT: Including 'displaySurface' or 'mandatory' in an Offscreen document 
-    // will trigger a system-level picker prompt, which is auto-rejected (Permission dismissed).
-    const W_MAP = { 'UHD': 3840, '1080P': 1920, '720P': 1280 };
-    const H_MAP = { 'UHD': 2160, '1080P': 1080, '720P': 720 };
-    const targetW = W_MAP[quality] || 1920;
-    const targetH = H_MAP[quality] || 1080;
-
-    const constraints = {
-      video: isAudioOnly ? false : {
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: streamId,
-          minWidth: targetW, minHeight: targetH,
-          maxWidth: targetW, maxHeight: targetH,
-        }
-      },
-      audio: {
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: streamId,
-        }
-      },
-    };
-    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch (err) {
-    logger.error(`${COMPONENT} getUserMedia failed: ${err.message}`);
-    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: `标签页捕获失败: ${err.message}` }).catch(() => { });
-    isRunning = false;
-    worker?.terminate(); worker = null;
-    return;
-  }
-
+  // 3. Extract tracks from the already-captured stream
   const videoTrack = mediaStream.getVideoTracks()[0];
   const audioTrack = mediaStream.getAudioTracks()[0];
 
@@ -193,7 +203,7 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
       const source = audioCtx.createMediaStreamSource(mediaStream);
       source.connect(audioCtx.destination);
       if (audioCtx.state === 'suspended') {
-        audioCtx.resume().catch(() => {});
+        audioCtx.resume().catch(() => { });
       }
     } catch (err) {
       logger.warn(`${COMPONENT} Audio bridging failed: ${err.message}`);
@@ -314,13 +324,29 @@ async function stopTest() {
 }
 
 // ---------------------------------------------------------------------------
-// Message handler
+// Message handler — Register early to avoid command loss during import delay.
 // ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  // Background asks us to re-confirm readiness so it can flush a queued command.
+  // Only respond if we are NOT mid-recording — a busy document should stay silent
+  // so the background keeps pendingRecordCommand queued until a fresh document is ready.
+  if (msg.type === 'REQUEST_RECORD_READY') {
+    if (!isRunning) {
+      chrome.runtime.sendMessage({ type: 'RECORD_OFFSCREEN_READY' }).catch(() => { });
+    }
+    sendResponse({ ok: !isRunning });
+    return true;
+  }
   if (msg.type === 'START_RECORD_TEST') {
-    startTest({ 
-      streamId: msg.streamId, 
-      quality: msg.quality || '1080P', 
+    // Only accept commands dispatched by the background SW (_isBackgroundProxy: true).
+    // The popup's chrome.runtime.sendMessage broadcasts to ALL contexts, so the
+    // offscreen would also receive the original popup message — which no longer
+    // carries a streamId. Ignore those direct broadcasts and wait for the
+    // background-proxied copy that includes the SW-obtained streamId.
+    if (!msg._isBackgroundProxy) { sendResponse({ ok: false }); return true; }
+    startTest({
+      streamId: msg.streamId,
+      quality: msg.quality || '1080P',
       isAudioOnly: msg.isAudioOnly || false,
       filename: msg.filename || 'recording.webm'
     });
@@ -333,16 +359,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'CLEAR_RECORD_STORAGE') {
-    // Force reset local state if popup detects a crash via heartbeat
     isRunning = false;
     if (_heartbeatInterval) { clearInterval(_heartbeatInterval); _heartbeatInterval = null; }
     if (worker) { worker.terminate(); worker = null; }
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-    clearSession().catch(() => {});
+    clearSession().catch(() => { });
     sendResponse({ ok: true });
     return true;
   }
 });
 
+// ---------------------------------------------------------------------------
+// Initialisation
+// ---------------------------------------------------------------------------
 chrome.runtime.sendMessage({ type: 'RECORD_OFFSCREEN_READY' }).catch(() => { });
 logger.info(`${COMPONENT} Offscreen document initialised`);

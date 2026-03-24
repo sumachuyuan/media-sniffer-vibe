@@ -162,6 +162,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.storage.local.set({ 'recordAudioOnlyPref': on }).catch(() => {});
     });
 
+    // Persist quality selection across popup opens
+    qualityEl?.addEventListener('change', () => {
+      chrome.storage.local.set({ 'recordQualityPref': qualityEl.value }).catch(() => {});
+    });
+
     // Step 0: Pre-fetch tab ID to ensure user gesture context in startBtn.onclick
     let activeTabId = null;
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -172,31 +177,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (startBtn.disabled) return;
       startBtn.disabled = true;
       startBtn.style.opacity = '0.4';
-      
-      // Step 1: Get tab capture streamId IMMEDIATELY while user gesture is active.
-      // CALL DIRECTLY in popup context to preserve user gesture context 100%.
-      // This synchronously links the click event to the tab capture request.
-      chrome.tabCapture.getMediaStreamId({ targetTabId: activeTabId }, (streamId) => {
-        if (!streamId) {
-          ui.showToast(`${t('error')}: ${chrome.runtime.lastError?.message || t('recordErrorStreamId')}`, 'error');
-          startBtn.disabled = false;
-          startBtn.style.opacity = '1';
-          if (qualityEl) qualityEl.disabled = false;
-          if (audioOnlyEl) audioOnlyEl.disabled = false;
-          return;
-        }
 
-        // Proceed to start recording flow via background dispatch with the valid streamId.
-        _startRecordingFlow(streamId, activeTabId);
+      // Pre-warm the offscreen document so any stale cleanup (force-recreate)
+      // happens before we hand off to the background for capture.
+      // NOTE: getMediaStreamId is intentionally NOT called here.
+      // Per Chrome docs, a streamId obtained from the popup can only be consumed
+      // by the popup itself. The background SW must call getMediaStreamId so the
+      // resulting streamId is valid for use in the offscreen document.
+      chrome.runtime.sendMessage({ type: 'PRE_WARM_RECORD_OFFSCREEN' }, () => {
+        _startRecordingFlow(activeTabId);
       });
     };
 
-    const _startRecordingFlow = (streamId, tabId) => {
+    const _startRecordingFlow = (tabId) => {
       startBtn.disabled = true;
       startBtn.style.opacity = '0.4';
       if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
       if (audioOnlyEl) audioOnlyEl.disabled = true;
-      
+
       // Phase 8.4: Reset UI elements from previous recording session
       if (saveVideoBtn) saveVideoBtn.style.display = 'none';
       if (extractAudioBtn) extractAudioBtn.style.display = 'none';
@@ -216,7 +214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const isAudioOnly = audioOnlyEl?.checked || false;
       const quality = isAudioOnly ? '1080P' : (qualityEl?.value || '1080P');
-      
+
       state.recordFileHandle = null; // No handle yet
       state.recordFilename = suggestedName;
       state.isAudioOnly = isAudioOnly;
@@ -224,9 +222,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Phase 8.2: Clear any stale "ready" state before starting a new recording
       chrome.storage.local.set({ recordingState: { isRecording: true, isReady: false } }).catch(() => {});
 
-      // Phase 9: Start record immediately with the temporary name.
-      // Data will be streamed to IndexedDB in the offscreen document.
-      chrome.runtime.sendMessage({ type: 'START_RECORD_TEST', streamId, quality, filename: suggestedName, isAudioOnly });
+      // Phase 9: Start record — background SW will call getMediaStreamId internally
+      // so the streamId is usable by the offscreen document.
+      chrome.runtime.sendMessage({ type: 'START_RECORD_TEST', targetTabId: tabId, quality, filename: suggestedName, isAudioOnly });
       startRecordingTimer(Date.now());
       startBtn.disabled = true;
       startBtn.style.opacity = '0.4';
@@ -422,13 +420,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
         
-        // Phase 8.5: Independently restore the toggle preference for NEXT recording
-        chrome.storage.local.get('recordAudioOnlyPref', (res) => {
+        // Phase 8.5: Independently restore toggle + quality preferences for NEXT recording
+        chrome.storage.local.get(['recordAudioOnlyPref', 'recordQualityPref'], (res) => {
             const on = !!res?.recordAudioOnlyPref;
             if (audioOnlyEl) {
                 audioOnlyEl.checked = on;
                 if (qualityEl) qualityEl.style.display = on ? 'none' : '';
                 if (macosNotice) macosNotice.style.display = (on || !_isMacOS) ? 'none' : 'block';
+            }
+            if (qualityEl && res?.recordQualityPref) {
+                qualityEl.value = res.recordQualityPref;
             }
         });
     });

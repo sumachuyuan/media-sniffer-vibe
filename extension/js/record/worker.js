@@ -90,6 +90,7 @@ let startTime = null;
 let lastWindowTime = null;
 let windowFrames = 0;
 let firstTimestamp = null; // first raw timestamp in microseconds
+let lastFrameTimestampUs = null; // monotonic guard — last timestamp sent to encoder
 
 // ---------------------------------------------------------------------------
 // Async muxer write queue
@@ -390,9 +391,19 @@ function handleFrame({ frame }) {
 
   const forceKeyFrame = (frameCount % KEYFRAME_INTERVAL === 1);
 
+  // Monotonic timestamp guard: VideoEncoder requires strictly non-decreasing
+  // timestamps. Under heavy GPU load (especially UHD) the capture pipeline can
+  // deliver frames with equal or slightly regressed timestamps.  Clamp any
+  // non-advancing frame to lastFrameTimestampUs + 1 µs so the encoder never
+  // sees a timestamp that goes backward.
+  let ts = frame.timestamp;
+  if (lastFrameTimestampUs !== null && ts <= lastFrameTimestampUs) {
+    ts = lastFrameTimestampUs + 1;
+  }
+  lastFrameTimestampUs = ts;
+
   if (offscreenCanvas) {
-    // Capture original timestamp before transferring frame to async chain
-    const ts = frame.timestamp;
+    // Capture corrected timestamp before transferring frame to async chain.
     frameProcessingChain = frameProcessingChain.then(() =>
       createImageBitmap(frame, { resizeWidth: encodeWidth, resizeHeight: encodeHeight, resizeQuality: 'medium' })
     ).then((bitmap) => {
@@ -408,8 +419,13 @@ function handleFrame({ frame }) {
       self.postMessage({ type: 'ENCODE_ERROR', error: `Frame scale error: ${err.message}` });
     });
   } else {
-    encoder.encode(frame, { keyFrame: forceKeyFrame });
-    frame.close();
+    // UHD path: re-wrap with corrected timestamp (VideoFrame.timestamp is read-only).
+    const correctedFrame = (ts === frame.timestamp)
+      ? frame
+      : new VideoFrame(frame, { timestamp: ts });
+    encoder.encode(correctedFrame, { keyFrame: forceKeyFrame });
+    correctedFrame.close();
+    if (correctedFrame !== frame) frame.close();
   }
 
   if (frameCount % 30 === 0) emitStats(false);
