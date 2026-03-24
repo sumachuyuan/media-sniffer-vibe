@@ -303,19 +303,11 @@ function handleAudioFrame({ frame }) {
     frame.close();
     return;
   }
-  if (firstTimestamp === null) firstTimestamp = frame.timestamp;
-  // Use normalized timestamp for encoded audio sync
-  const ts = frame.timestamp - firstTimestamp;
-  const audioData = new AudioData({
-    format: frame.format,
-    sampleRate: frame.sampleRate,
-    numberOfFrames: frame.numberOfFrames,
-    numberOfChannels: frame.numberOfChannels,
-    timestamp: ts,
-    data: frame
-  });
-  audioEncoder.encode(audioData);
-  audioData.close();
+  // Pass the raw AudioData directly — timestamp normalisation happens in
+  // handleEncodedAudio (the encoder output callback) via overrideTimestampUs,
+  // because EncodedAudioChunk.timestamp is read-only and AudioData.timestamp
+  // cannot be changed without copying all PCM data into a new buffer.
+  audioEncoder.encode(frame);
   frame.close();
 }
 
