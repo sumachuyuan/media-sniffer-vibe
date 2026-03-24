@@ -25,9 +25,9 @@
 ### 🛠️ 2. 核心功能概览
 
 ![Extreme Recording](images/2.png)
-*图：极端录制 (Extreme Recording) 模式下的实时硬件编码统计*
+*图：极致录制 (Extreme Recording) 模式下的实时硬件编码统计*
 
--   **极端录制 (Extreme Recording)**: 🛡️ 支持 4K 原画/1080P/720P 定制录制。物理隔离采集锁，内置时间戳平滑技术，确保长时录制不掉帧、不乱跳。
+-   **极致录制 (Extreme Recording)**: 🛡️ 支持 4K 原画/1080P/720P 定制录制。物理隔离采集锁，内置时间戳平滑技术，确保长时录制不掉帧、不乱跳。
 -   **原生合并 (Native Merge)**: 利用 `FFmpeg.wasm` 技术，在浏览器内部直接将 HLS/DASH/fMP4 分段流合并为 MP4，**零延迟、无需服务器**。
 -   **智能配对**: 自动识别音视频分离的流媒体（如 YouTube/B站），提供一键“提取并合并”功能。
 -   **高能模式 (High Performance)**: 🚀 按钮开启 3-5 线程并发抓取，下载提速 300%+。
