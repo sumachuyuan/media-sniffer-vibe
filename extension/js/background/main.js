@@ -367,27 +367,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Forward stats / lifecycle events from offscreen → popup
   if (type === 'RECORD_STATS' || type === 'RECORD_STOPPED' || type === 'RECORD_ERROR' || type === 'RECORD_HW_CHECK') {
     chrome.runtime.sendMessage(request).catch(() => {});
+
     if (type === 'RECORD_STOPPED' || type === 'RECORD_ERROR') {
-      // Clear persisted recording state so popup does not show stale reconnect UI.
+      // Clear persisted recording state IMMEDIATELY so popup does not show
+      // stale reconnect UI on next open. Must not wait for any async chain.
       chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
     }
+
     if (type === 'RECORD_STOPPED') {
-      // Await full offscreen teardown before opening the FFmpeg offscreen for remux —
-      // Chrome only allows one offscreen document at a time.
-      closeRecordOffscreen().then(() => {
-        if (request.filename) {
-          state.globalMergeStatus = {
-            isMerging: true,
-            itemId: null,
-            url: request.filename,
-            title: `转封装: ${request.filename}`,
-            progress: 0,
-            stage: '准备 MP4 转封装...',
-          };
-          handleFfmpegRemux({ outputName: request.filename });
-        }
-      });
+      // Close the record offscreen right away — remux will be triggered later
+      // by RECORD_BLOB_READY once the record offscreen has stored file bytes in IDB.
+      closeRecordOffscreen();
     }
+
+    sendResponse({ ok: true });
+  }
+
+  // record/offscreen.js sends RECORD_BLOB_READY after storing the WebM bytes
+  // in IDB. Only now is it safe to open the FFmpeg offscreen for remux.
+  if (type === 'RECORD_BLOB_READY') {
+    if (request.filename) {
+      state.globalMergeStatus = {
+        isMerging: true,
+        itemId: null,
+        url: request.filename,
+        title: `转封装: ${request.filename}`,
+        progress: 0,
+        stage: '准备 MP4 转封装...',
+      };
+      handleFfmpegRemux({ outputName: request.filename });
+    }
+    sendResponse({ ok: true });
+  }
+
+  if (type === 'RECORD_BLOB_FAILED') {
+    logger.warn(`Remux blob storage failed for ${request.filename}: ${request.error}`);
+    chrome.runtime.sendMessage({
+      type: 'FFMPEG_ERROR',
+      error: `录制文件读取失败，无法转封装: ${request.error}`,
+      isRemux: true,
+    }).catch(() => {});
     sendResponse({ ok: true });
   }
   // ---------------------------------------------------------------------------

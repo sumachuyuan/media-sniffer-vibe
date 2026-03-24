@@ -135,25 +135,28 @@ async function startTest({ streamId, quality }) {
       chrome.runtime.sendMessage({ type: 'RECORD_HW_CHECK', mode: msg.mode, codec: msg.codec }).catch(() => { });
 
     } else if (msg.type === 'RECORD_WRITE_COMPLETE') {
-      // Worker has flushed encoder + muxer + closed the writable stream.
-      // Read the file back as a Blob and persist it in IDB BEFORE sending
-      // RECORD_STOPPED. This gives the FFmpeg offscreen a permission-free way
-      // to access the data — fileHandle.getFile() in a new document context
-      // would throw SecurityError (user activation required).
+      // Send RECORD_STOPPED immediately so the background clears isRecording
+      // in storage without waiting for the (potentially slow) IDB write.
       logger.info(`${COMPONENT} File write complete: ${msg.filename}`);
       const filename = msg.filename;
+      chrome.runtime.sendMessage({
+        type: 'RECORD_STOPPED',
+        totalFrames: frameIndex,
+        filename,
+      }).catch(() => {});
+      setTimeout(() => { if (worker) { worker.terminate(); worker = null; } }, 100);
+
+      // Store the recorded bytes in IDB for the FFmpeg remux offscreen.
+      // This is fire-and-forget from the UI perspective; background waits for
+      // RECORD_BLOB_READY before triggering the remux.
       (async () => {
         try {
           await _storeRemuxBytes(fileHandle);
+          chrome.runtime.sendMessage({ type: 'RECORD_BLOB_READY', filename }).catch(() => {});
         } catch (err) {
           logger.warn(`${COMPONENT} Failed to store remux bytes: ${err.message}`);
+          chrome.runtime.sendMessage({ type: 'RECORD_BLOB_FAILED', filename, error: err.message }).catch(() => {});
         }
-        chrome.runtime.sendMessage({
-          type: 'RECORD_STOPPED',
-          totalFrames: frameIndex,
-          filename,
-        }).catch(() => {});
-        setTimeout(() => { if (worker) { worker.terminate(); worker = null; } }, 100);
       })();
 
     } else if (msg.type === 'ENCODE_ERROR') {
