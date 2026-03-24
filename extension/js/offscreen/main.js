@@ -26,8 +26,8 @@ function _retrieveFileHandle() {
   });
 }
 
-/** Retrieve the Blob saved by record/offscreen.js after recording completes. */
-function _retrieveRemuxBlob() {
+/** Retrieve the ArrayBuffer saved by record/offscreen.js after recording completes. */
+function _retrieveRemuxBytes() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(_IDB.name, 1);
     req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
@@ -42,7 +42,7 @@ function _retrieveRemuxBlob() {
   });
 }
 
-/** Delete the remux Blob from IDB after use to free storage space. */
+/** Delete the remux bytes from IDB after use to free storage space. */
 function _clearRemuxBlob() {
   return new Promise((resolve) => {
     const req = indexedDB.open(_IDB.name, 1);
@@ -337,17 +337,17 @@ async function handleWebMRemux(m) {
   try {
     sendProgress(5, outputName, '读取录制文件...');
 
-    // Read the recorded WebM from IDB as a Blob.
-    // record/offscreen.js stores the Blob in IDB (under _IDB_REMUX_KEY) after
-    // the worker closes the file — this avoids FileSystemFileHandle.getFile()
+    // Read the recorded WebM bytes from IDB.
+    // record/offscreen.js stores the file as a plain ArrayBuffer in IDB after
+    // the worker closes the writable stream — this avoids fileHandle.getFile()
     // which throws SecurityError in a new document context (user activation required).
-    const blob = await _retrieveRemuxBlob();
-    if (!blob) throw new Error('IDB 中未找到录制 Blob，请重试录制');
+    const buffer = await _retrieveRemuxBytes();
+    if (!buffer) throw new Error('IDB 中未找到录制数据，请重试录制');
 
-    const fileSizeMB = (blob.size / 1024 / 1024).toFixed(0);
-    logger.info(`[Remux] Input: ${outputName} (${fileSizeMB} MB)`);
+    const fileSizeMB = (buffer.byteLength / 1024 / 1024).toFixed(1);
+    logger.info(`[Remux] Input: ${outputName} (${fileSizeMB} MB from IDB)`);
 
-    const inputBytes = new Uint8Array(await blob.arrayBuffer());
+    const inputBytes = new Uint8Array(buffer);
 
     sendProgress(20, outputName, '初始化 FFmpeg...');
     ffmpeg = await initFFmpeg(true);

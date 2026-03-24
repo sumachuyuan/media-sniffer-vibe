@@ -33,22 +33,38 @@ const _IDB = { name: 'vibeRecordDB', store: 'handles', key: 'currentFileHandle' 
 const _IDB_REMUX_KEY = 'remuxInputBlob';
 
 /**
- * Store the recorded File/Blob in IDB so the FFmpeg offscreen can read it
- * without needing FileSystemFileHandle permission in a new document context.
+ * Read the recorded file as an ArrayBuffer and persist it in IDB.
+ *
+ * Why ArrayBuffer and not File/Blob:
+ *   Chrome's structured-clone of File objects across extension offscreen
+ *   documents can silently fail retrieval. A plain ArrayBuffer is always
+ *   serialisable and retrieves reliably.
+ *
+ * Why tx.oncomplete and not put.onsuccess:
+ *   put.onsuccess fires when the IDB request is accepted but before the
+ *   transaction is committed. Resolving on put.onsuccess + db.close() can
+ *   race the commit, leaving the entry absent for subsequent readers.
+ *   tx.oncomplete fires only after the transaction is durably committed.
  */
-function _storeRemuxBlob(blob) {
-  return new Promise((resolve, reject) => {
+async function _storeRemuxBytes(fileHandle) {
+  const file = await fileHandle.getFile();
+  logger.info(`${COMPONENT} Reading recorded file for remux (${(file.size / 1024 / 1024).toFixed(1)} MB)...`);
+  const buffer = await file.arrayBuffer();
+  logger.info(`${COMPONENT} Storing remux bytes in IDB...`);
+  await new Promise((resolve, reject) => {
     const req = indexedDB.open(_IDB.name, 1);
     req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
     req.onsuccess = (e) => {
       const db = e.target.result;
       const tx = db.transaction(_IDB.store, 'readwrite');
-      const put = tx.objectStore(_IDB.store).put(blob, _IDB_REMUX_KEY);
-      put.onsuccess = () => { db.close(); resolve(); };
-      put.onerror = () => { db.close(); reject(put.error); };
+      tx.objectStore(_IDB.store).put(buffer, _IDB_REMUX_KEY);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror   = () => { db.close(); reject(tx.error); };
+      tx.onabort   = () => { db.close(); reject(new Error('IDB transaction aborted')); };
     };
     req.onerror = () => reject(req.error);
   });
+  logger.info(`${COMPONENT} Remux bytes stored in IDB (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
 }
 
 function _retrieveFileHandle() {
@@ -128,11 +144,9 @@ async function startTest({ streamId, quality }) {
       const filename = msg.filename;
       (async () => {
         try {
-          const file = await fileHandle.getFile();
-          await _storeRemuxBlob(file);
-          logger.info(`${COMPONENT} Remux blob stored in IDB (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+          await _storeRemuxBytes(fileHandle);
         } catch (err) {
-          logger.warn(`${COMPONENT} Failed to store remux blob: ${err.message}`);
+          logger.warn(`${COMPONENT} Failed to store remux bytes: ${err.message}`);
         }
         chrome.runtime.sendMessage({
           type: 'RECORD_STOPPED',
