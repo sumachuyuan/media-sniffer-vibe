@@ -339,11 +339,9 @@ function handleFrame({ frame }) {
 
   const forceKeyFrame = (frameCount % KEYFRAME_INTERVAL === 1);
 
-  if (firstTimestamp === null) firstTimestamp = frame.timestamp;
-  const ts = frame.timestamp - firstTimestamp;
-
   if (offscreenCanvas) {
-    // Capture normalized timestamp before transferring frame to async chain
+    // Capture original timestamp before transferring frame to async chain
+    const ts = frame.timestamp;
     frameProcessingChain = frameProcessingChain.then(() =>
       createImageBitmap(frame, { resizeWidth: encodeWidth, resizeHeight: encodeHeight, resizeQuality: 'medium' })
     ).then((bitmap) => {
@@ -359,9 +357,7 @@ function handleFrame({ frame }) {
       self.postMessage({ type: 'ENCODE_ERROR', error: `Frame scale error: ${err.message}` });
     });
   } else {
-    const normalizedFrame = new VideoFrame(frame, { timestamp: ts });
-    encoder.encode(normalizedFrame, { keyFrame: forceKeyFrame });
-    normalizedFrame.close();
+    encoder.encode(frame, { keyFrame: forceKeyFrame });
     frame.close();
   }
 
