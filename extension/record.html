@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Vibe Record Offscreen</title>
+</head>
+<body>
+  <!--
+    Hidden canvas used to generate a synthetic video stream for Phase 1 prototype validation.
+    In production, this will be replaced by getDisplayMedia() capture.
+  -->
+  <canvas id="testCanvas" width="640" height="360" style="display:none"></canvas>
+  <script type="module" src="js/record/offscreen.js"></script>
+</body>
+</html>

@@ -5,6 +5,25 @@ import { logger } from '../common/logger.js';
 import { initFFmpeg, runFFmpeg, cleanupFS, cleanupAfterMerge } from './ffmpeg.js';
 import { decryptBuffer } from './crypto.js';
 
+// ---------------------------------------------------------------------------
+// IndexedDB helper — retrieves the FileSystemFileHandle stored by the popup.
+// ---------------------------------------------------------------------------
+const _IDB = { name: 'vibeRecordDB', store: 'handles', key: 'currentFileHandle' };
+function _retrieveFileHandle() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_IDB.name, 1);
+    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      const tx = db.transaction(_IDB.store, 'readonly');
+      const get = tx.objectStore(_IDB.store).get(_IDB.key);
+      get.onsuccess = () => { db.close(); resolve(get.result); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
 let isMerging = false;
 let isCancelled = false;
 
@@ -273,10 +292,85 @@ async function handleProxyDownload(m) {
   }
 }
 
+// --- WebM → MP4 Remux (Phase 5) ---
+// Called after recording completes; reads the saved .webm via FileSystemFileHandle,
+// remuxes to .mp4 with -c copy -movflags +faststart (no re-encode), then triggers download.
+async function handleWebMRemux(m) {
+  if (isMerging) return;
+  isMerging = true;
+  const { outputName } = m;
+
+  // Retrieve fileHandle from IndexedDB (stored by popup, not passable over IPC).
+  let fileHandle;
+  try {
+    fileHandle = await _retrieveFileHandle();
+    if (!fileHandle || typeof fileHandle.createWritable !== 'function') throw new Error('IDB fileHandle invalid');
+  } catch (err) {
+    logger.error('[Remux] fileHandle retrieval failed', err);
+    chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `FileHandle 取得失敗: ${err.message}`, url: outputName, isRemux: true }).catch(() => {});
+    isMerging = false;
+    return;
+  }
+
+  let ffmpeg = null;
+  try {
+    sendProgress(5, outputName, '读取录制文件...');
+
+    // Read the WebM file back through the FileSystemFileHandle
+    const file = await fileHandle.getFile();
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(0);
+    logger.info(`[Remux] Input: ${outputName} (${fileSizeMB} MB)`);
+
+    const inputBytes = new Uint8Array(await file.arrayBuffer());
+
+    sendProgress(20, outputName, '初始化 FFmpeg...');
+    ffmpeg = await initFFmpeg(true);
+    cleanupFS(ffmpeg);
+
+    ffmpeg.FS('writeFile', 'input.webm', inputBytes);
+
+    sendProgress(45, outputName, '转封装为 MP4...');
+    const mp4Name = outputName.replace(/\.webm$/i, '.mp4');
+    const result = await runFFmpeg(ffmpeg, [
+      '-y', '-nostdin',
+      '-i', 'input.webm',
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      'output.mp4',
+    ]);
+
+    if (result !== 0) throw new Error('FFmpeg remux 执行失败，请检查 WebM 文件格式');
+
+    sendProgress(90, outputName, '准备下载...');
+    const outData = ffmpeg.FS('readFile', 'output.mp4');
+    const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
+
+    chrome.runtime.sendMessage({
+      type: 'FFMPEG_COMPLETE',
+      blobUrl,
+      filename: mp4Name,
+      url: outputName,
+      isRemux: true,
+    }).catch(() => {});
+  } catch (e) {
+    logger.error('[Remux] Error', e);
+    chrome.runtime.sendMessage({
+      type: 'FFMPEG_ERROR',
+      error: `MP4 转封装失败: ${e.message}`,
+      url: outputName,
+      isRemux: true,
+    }).catch(() => {});
+  } finally {
+    if (ffmpeg) cleanupAfterMerge(ffmpeg);
+    isMerging = false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'FFMPEG_MERGE') handleMerge(m);
   if (m.type === 'FFMPEG_MERGE_SEGMENTS') handleMergeSegments(m);
   if (m.type === 'START_PROXY_DOWNLOAD') handleProxyDownload(m);
+  if (m.type === 'WEBM_REMUX') handleWebMRemux(m);
   if (m.type === 'CANCEL_FFMPEG_MERGE') isCancelled = true;
 });
 

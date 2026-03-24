@@ -10,8 +10,9 @@ import {
 import { PLATFORM_RULES } from './platforms.js';
 import { parseM3U8, parseMPD, parseHlsSegments, parseDashSegments } from './parser.js';
 import {
-  handleFfmpegMerge, handleProxyDownload,
-  handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch
+  handleFfmpegMerge, handleProxyDownload, handleFfmpegRemux,
+  handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch,
+  dispatchToRecordOffscreen, handleRecordOffscreenReady, closeRecordOffscreen,
 } from './orchestrator.js';
 
 // --- Helper: Add Media to Storage ---
@@ -249,6 +250,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (type === 'START_WEBM_REMUX') {
+    // Phase 5: Post-recording WebM → MP4 container remux via FFmpeg.wasm (no re-encode).
+    state.globalMergeStatus = {
+      isMerging: true,
+      itemId: null,
+      url: request.outputName,
+      title: `转封装: ${request.outputName}`,
+      progress: 0,
+      stage: '准备 MP4 转封装...',
+    };
+    handleFfmpegRemux(request);
+    sendResponse({ status: 'queued' });
+  }
+
   if (type === 'START_FFMPEG_MERGE') {
     logger.info(`START_FFMPEG_MERGE initiated for: ${request.outputName}`, { segments: request.segments?.length });
     state.globalMergeStatus = {
@@ -301,6 +316,67 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     setTimeout(() => chrome.offscreen.closeDocument().catch(() => { }), 500);
     sendResponse({ status: 'cancelled' });
   }
+
+  // ---------------------------------------------------------------------------
+  // Record Offscreen — Phase 1 Transferable prototype
+  // ---------------------------------------------------------------------------
+  if (type === 'GET_TAB_STREAM_ID') {
+    // Phase 4: obtain a tabCapture stream ID so the offscreen document can call getUserMedia.
+    // chrome.tabCapture.getMediaStreamId is only available in the service worker context.
+    chrome.tabCapture.getMediaStreamId({ targetTabId: request.targetTabId }, (streamId) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ streamId });
+      }
+    });
+    return true;
+  }
+
+  if (type === 'START_RECORD_TEST') {
+    // fileHandle is NOT passed here — it is stored in IndexedDB by the popup
+    // and retrieved directly by the offscreen document, bypassing IPC serialization.
+    dispatchToRecordOffscreen({
+      type: 'START_RECORD_TEST',
+      streamId: request.streamId,
+      quality: request.quality,
+    });
+    // Persist recording state so popup can restore UI after being reopened.
+    chrome.storage.local.set({
+      recordingState: {
+        isRecording: true,
+        startTime: Date.now(),
+        filename: request.filename || null,
+        quality: request.quality || '1080P',
+      },
+    }).catch(() => {});
+    sendResponse({ status: 'dispatched' });
+  }
+
+  if (type === 'STOP_RECORD_TEST') {
+    // Offscreen is already open — send directly
+    chrome.runtime.sendMessage({ type: 'STOP_RECORD_TEST' }).catch(() => {});
+    sendResponse({ status: 'dispatched' });
+  }
+
+  if (type === 'RECORD_OFFSCREEN_READY') {
+    handleRecordOffscreenReady();
+    sendResponse({ ok: true });
+  }
+
+  // Forward stats / lifecycle events from offscreen → popup
+  if (type === 'RECORD_STATS' || type === 'RECORD_STOPPED' || type === 'RECORD_ERROR' || type === 'RECORD_HW_CHECK') {
+    chrome.runtime.sendMessage(request).catch(() => {});
+    if (type === 'RECORD_STOPPED' || type === 'RECORD_ERROR') {
+      // Clear persisted recording state so popup does not show stale reconnect UI.
+      chrome.storage.local.set({ recordingState: { isRecording: false } }).catch(() => {});
+    }
+    if (type === 'RECORD_STOPPED') {
+      closeRecordOffscreen();
+    }
+    sendResponse({ ok: true });
+  }
+  // ---------------------------------------------------------------------------
 
   if (type === 'FFMPEG_READY') { handleOffscreenReady(); sendResponse({ status: 'ready' }); }
 

@@ -50,6 +50,8 @@ const WORK_FILE_PATTERNS = [
     /^part_\d+\.ts$/,
     /^(iv|ia|init|final|merged)\.(mp4|mkv)$/,
     /^concat\.txt$/,
+    /^input\.webm$/,          // WebM remux: input
+    /^output\.mp4$/,          // WebM remux: output
 ];
 
 export function cleanupFS(ffmpeg) {

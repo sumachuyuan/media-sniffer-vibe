@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_appName__",
-  "version": "1.39.0",
+  "version": "1.44.0",
   "description": "__MSG_appDesc__",
   "default_locale": "zh_CN",
   "permissions": [
@@ -10,7 +10,8 @@
     "storage",
     "clipboardWrite",
     "downloads",
-    "offscreen"
+    "offscreen",
+    "tabCapture"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

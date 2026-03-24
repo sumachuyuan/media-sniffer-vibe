@@ -8,13 +8,72 @@ import { i18n } from './i18n.js';
 
 const t = (key, subs) => i18n.t(key, subs);
 
+// ---------------------------------------------------------------------------
+// IndexedDB helper — stores FileSystemFileHandle so it can be retrieved by
+// the offscreen document without losing its prototype chain over IPC.
+// ---------------------------------------------------------------------------
+const _IDB = { name: 'vibeRecordDB', store: 'handles', key: 'currentFileHandle' };
+function _openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_IDB.name, 1);
+    req.onupgradeneeded = (e) => e.target.result.createObjectStore(_IDB.store);
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function _storeFileHandle(handle) {
+  const db = await _openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(_IDB.store, 'readwrite');
+    tx.objectStore(_IDB.store).put(handle, _IDB.key);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 let state = {
     mergingUrl: null,
     mergingProgress: 0,
     mergingStage: '',
     ua: navigator.userAgent,
-    concurrency: 3 // Default
+    concurrency: 3, // Default
+    recordFileHandle: null,  // retained after recording for remux
+    recordFilename: null,
+    recordingStartTime: null,
 };
+
+// Phase 6: timer + I/O recovery state
+let _recordingTimerInterval = null;
+let _prevBitrateReduced = false;
+
+function formatElapsed(totalSeconds) {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function startRecordingTimer(startTime) {
+    stopRecordingTimer();
+    state.recordingStartTime = startTime;
+    const timerEl = document.getElementById('record-timer');
+    if (timerEl) timerEl.style.display = 'inline-block';
+    _recordingTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - state.recordingStartTime) / 1000);
+        const el = document.getElementById('record-timer');
+        if (el) el.textContent = formatElapsed(elapsed);
+    }, 1000);
+}
+
+function stopRecordingTimer() {
+    if (_recordingTimerInterval) {
+        clearInterval(_recordingTimerInterval);
+        _recordingTimerInterval = null;
+    }
+    state.recordingStartTime = null;
+    const timerEl = document.getElementById('record-timer');
+    if (timerEl) timerEl.style.display = 'none';
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
     // 0. Initialize i18n
@@ -72,6 +131,115 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('searchBar').oninput = () => renderUrls();
 
+    // --- Phase 4: Real tab capture + audio + resolution ---
+    const startBtn   = document.getElementById('record-start-btn');
+    const stopBtn    = document.getElementById('record-stop-btn');
+    const statsEl    = document.getElementById('record-stats');
+    const dotEl      = document.getElementById('record-indicator');
+    const qualityEl  = document.getElementById('record-quality');
+    const macosNotice = document.getElementById('record-macos-notice');
+
+    // Show macOS audio notice on macOS
+    if (navigator.platform.startsWith('Mac') || navigator.userAgent.includes('Mac')) {
+      if (macosNotice) macosNotice.style.display = 'block';
+    }
+
+    startBtn.onclick = async () => {
+      // Step 1: Get the active tab ID for tabCapture.
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabId = tabs[0]?.id;
+      if (!tabId) {
+        statsEl.style.display = 'block';
+        statsEl.innerHTML = `<span style="color:#f44">错误: 无法获取当前标签页</span>`;
+        return;
+      }
+
+      // Step 2: Request a stream ID from the background (tabCapture API).
+      let streamId;
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_TAB_STREAM_ID', targetTabId: tabId });
+        if (!resp?.streamId) throw new Error(resp?.error || '无法获取标签页流 ID');
+        streamId = resp.streamId;
+      } catch (err) {
+        statsEl.style.display = 'block';
+        statsEl.innerHTML = `<span style="color:#f44">错误: ${err.message}</span>`;
+        return;
+      }
+
+      // Step 3: Show save file picker (must happen after awaits — still within user gesture context
+      // for Chrome extension popup pages, which retain activation across async calls).
+      let fileHandle;
+      try {
+        const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName: `vibe_recording_${ts}.webm`,
+          types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
+        });
+      } catch (err) {
+        if (err.name === 'AbortError') return; // User cancelled — no toast
+        ui.showToast(`文件选择失败: ${err.message}`, 'error');
+        return;
+      }
+
+      const quality = qualityEl?.value || '1080P';
+      state.recordFileHandle = fileHandle;
+      state.recordFilename = null; // cleared until RECORD_STOPPED
+
+      // Store fileHandle in IndexedDB so the offscreen document can retrieve it
+      // without losing its prototype chain through chrome.runtime.sendMessage IPC.
+      await _storeFileHandle(fileHandle);
+      chrome.runtime.sendMessage({ type: 'START_RECORD_TEST', streamId, quality, filename: fileHandle.name });
+      startRecordingTimer(Date.now());
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.4';
+      if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
+      stopBtn.disabled = false;
+      stopBtn.style.cursor = 'pointer';
+      stopBtn.style.color = '#ff5252';
+      stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
+      stopBtn.style.background = 'rgba(255,60,60,0.08)';
+      dotEl.style.background = '#ff5252';
+      dotEl.style.boxShadow = '0 0 6px #ff5252';
+      // Hide remux button from any previous session
+      const remuxWrap = document.getElementById('record-remux-wrap');
+      if (remuxWrap) remuxWrap.style.display = 'none';
+      const remuxBtn = document.getElementById('record-remux-btn');
+      if (remuxBtn) { remuxBtn.disabled = false; remuxBtn.textContent = '⬇ 转为 MP4'; }
+      statsEl.style.display = 'block';
+      statsEl.innerHTML =
+        `录制文件: <b style="color:#aaa">${fileHandle.name}</b>` +
+        `&nbsp;&nbsp;<span style="color:#555">${quality}</span>` +
+        `&nbsp; 等待编码器...`;
+    };
+
+    // Remux button: convert recorded .webm to .mp4 via FFmpeg
+    const remuxBtn = document.getElementById('record-remux-btn');
+    if (remuxBtn) {
+      remuxBtn.onclick = () => {
+        if (!state.recordFileHandle || !state.recordFilename) return;
+        remuxBtn.disabled = true;
+        remuxBtn.textContent = '⏳ 转码中...';
+        // fileHandle is already in IndexedDB from the recording session; no need to pass it.
+        chrome.runtime.sendMessage({
+          type: 'START_WEBM_REMUX',
+          outputName: state.recordFilename,
+        });
+      };
+    }
+
+    stopBtn.onclick = () => {
+      chrome.runtime.sendMessage({ type: 'STOP_RECORD_TEST' });
+      stopRecordingTimer();
+      stopBtn.disabled = true;
+      stopBtn.style.cursor = 'not-allowed';
+      stopBtn.style.color = '#444';
+      stopBtn.style.borderColor = 'rgba(255,255,255,0.08)';
+      stopBtn.style.background = 'rgba(255,255,255,0.03)';
+      dotEl.style.background = '#888';
+      dotEl.style.boxShadow = 'none';
+      if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+    };
+
     document.getElementById('global-cancel-btn').onclick = () => {
         if (state.mergingUrl) {
             chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE', url: state.mergingUrl });
@@ -79,6 +247,29 @@ document.addEventListener('DOMContentLoaded', async () => {
             renderUrls();
         }
     };
+
+    // Phase 6: Reconnect — restore UI if recording was active when popup was closed/reopened
+    chrome.storage.local.get('recordingState', (result) => {
+        const rs = result?.recordingState;
+        if (!rs?.isRecording) return;
+        // Recording is in progress — restore UI to active state
+        if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.style.cursor = 'pointer';
+            stopBtn.style.color = '#ff5252';
+            stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
+            stopBtn.style.background = 'rgba(255,60,60,0.08)';
+        }
+        if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
+        if (dotEl) { dotEl.style.background = '#ff5252'; dotEl.style.boxShadow = '0 0 6px #ff5252'; }
+        if (statsEl) {
+            statsEl.style.display = 'block';
+            statsEl.innerHTML = `<span style="color:#ff5252">⬤ 录制中…</span>&nbsp;&nbsp;<span style="color:#555">${rs.quality || ''}</span>`;
+        }
+        // Start local timer ticking from persisted startTime
+        if (rs.startTime) startRecordingTimer(rs.startTime);
+    });
 
     chrome.runtime.onMessage.addListener(handleRuntimeMessages);
 });
@@ -325,6 +516,97 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
 }
 
 function handleRuntimeMessages(m) {
+    // --- Phase 2: WebCodecs encoding stats ---
+    if (m.type === 'RECORD_HW_CHECK') {
+      const statsEl = document.getElementById('record-stats');
+      if (!statsEl) return;
+      const modeColor = m.mode === 'HW' ? '#00e676' : '#ffb300';
+      const modeLabel = m.mode === 'HW' ? 'GPU 硬编' : '软件编码';
+      statsEl.style.display = 'block';
+      statsEl.innerHTML =
+        `编码器就绪 &nbsp;` +
+        `<b style="color:${modeColor};padding:1px 5px;border:1px solid ${modeColor};border-radius:3px;font-size:8px;">${modeLabel}</b>` +
+        `&nbsp;&nbsp;<span style="color:#555">${m.codec}</span>`;
+      return;
+    }
+    if (m.type === 'RECORD_STATS') {
+      const s = m.stats;
+      const statsEl = document.getElementById('record-stats');
+      if (!statsEl) return;
+      const modeColor = s.encoderMode === 'HW' ? '#00e676' : '#ffb300';
+      const modeLabel = s.encoderMode === 'HW' ? 'GPU 硬编' : '软件编码';
+      const audioLine = s.hasAudio
+        ? `&nbsp;&nbsp;audio: <b style="color:#ab47bc">${s.audioEncodedCount || 0} pkts</b>`
+        : '';
+      const pendingMB = parseFloat(s.pendingMB || 0);
+      const bufColor = s.bitrateReduced ? '#f44336' : (pendingMB > 10 ? '#ffb300' : '#555');
+      const bufLine = pendingMB > 0.1
+        ? `&nbsp;&nbsp;buf: <b style="color:${bufColor}">${s.pendingMB} MB${s.bitrateReduced ? ' ⚠' : ''}</b>`
+        : '';
+      // I/O recovery toast: bitrateReduced true→false
+      if (_prevBitrateReduced && !s.bitrateReduced) {
+        ui.showToast('I/O 已恢复，码率已还原');
+      }
+      _prevBitrateReduced = !!s.bitrateReduced;
+
+      const elapsedStr = formatElapsed(s.elapsed || 0);
+      // Sync timer element with worker's authoritative elapsed value
+      const timerEl = document.getElementById('record-timer');
+      if (timerEl && timerEl.style.display !== 'none') timerEl.textContent = elapsedStr;
+
+      const finalLine = s.final
+        ? `<br><span style="color:#aaa">总编码: <b>${s.totalEncodedMB} MB</b></span>`
+        : '';
+      statsEl.innerHTML =
+        `frames: <b style="color:#00e676">${s.frameCount}</b>` +
+        `&nbsp;&nbsp;encoded: <b style="color:#00e676">${s.encodedCount}</b>` +
+        `&nbsp;&nbsp;keys: <b style="color:#aaa">${s.keyframeCount}</b>` +
+        audioLine +
+        `<br>fps: <b style="color:#00e676">${s.instantFps}</b> (avg ${s.avgFps})` +
+        `&nbsp;&nbsp;bitrate: <b style="color:${s.bitrateReduced ? '#f44336' : '#ffb300'}">${s.bitrateKbps} kbps${s.bitrateReduced ? ' ↓' : ''}</b>` +
+        `<br>written: <b style="color:#29b6f6">${s.writtenMB} MB</b>` +
+        bufLine +
+        `&nbsp;&nbsp;res: <b style="color:#aaa">${s.resolution}</b>` +
+        `&nbsp;&nbsp;mode: <b style="color:${modeColor}">${modeLabel}</b>` +
+        `<br>elapsed: <b style="color:#aaa">${elapsedStr}</b>` +
+        finalLine;
+      return;
+    }
+    if (m.type === 'RECORD_STOPPED') {
+      stopRecordingTimer();
+      _prevBitrateReduced = false;
+      const statsEl    = document.getElementById('record-stats');
+      const startBtn   = document.getElementById('record-start-btn');
+      const qualityEl  = document.getElementById('record-quality');
+      const dotEl      = document.getElementById('record-indicator');
+      const remuxWrap  = document.getElementById('record-remux-wrap');
+      if (statsEl) statsEl.innerHTML +=
+        `<br><span style="color:#29b6f6">文件已写入: <b>${m.filename || '—'}</b></span>` +
+        `<br><span style="color:#ff5252">已停止 — 共传输 <b>${m.totalFrames}</b> 帧给编码器</span>`;
+      if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+      if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+      if (dotEl)    { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
+      // Store filename so remux button can use it; show button if fileHandle was captured
+      if (m.filename) state.recordFilename = m.filename;
+      if (remuxWrap && state.recordFileHandle) remuxWrap.style.display = 'block';
+      return;
+    }
+    if (m.type === 'RECORD_ERROR') {
+      stopRecordingTimer();
+      _prevBitrateReduced = false;
+      const statsEl   = document.getElementById('record-stats');
+      const startBtn  = document.getElementById('record-start-btn');
+      const stopBtn   = document.getElementById('record-stop-btn');
+      const qualityEl = document.getElementById('record-quality');
+      const dotEl     = document.getElementById('record-indicator');
+      if (statsEl) { statsEl.style.display = 'block'; statsEl.innerHTML = `<span style="color:#ff5252">错误: ${m.error}</span>`; }
+      if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+      if (stopBtn)  { stopBtn.disabled = true; stopBtn.style.cursor = 'not-allowed'; }
+      if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+      if (dotEl)    { dotEl.style.background = '#f44'; dotEl.style.boxShadow = 'none'; }
+      return;
+    }
+
     if (m.type === 'FFMPEG_PROGRESS') {
         if (m.url && !state.mergingUrl) { state.mergingUrl = m.url; renderUrls(); }
         state.mergingProgress = m.progress;
@@ -343,12 +625,24 @@ function handleRuntimeMessages(m) {
         }
     } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
         const isProxy = m.isProxy;
+        const isRemux = m.isRemux;
+        const remuxBtn = document.getElementById('record-remux-btn');
         if (m.type === 'FFMPEG_COMPLETE') {
-            ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
+            if (isRemux) {
+              if (remuxBtn) { remuxBtn.textContent = '✓ MP4 已保存'; remuxBtn.disabled = true; }
+              ui.showToast('MP4 转封装完成，文件已保存');
+            } else {
+              ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
+            }
         } else {
-            ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
+            if (isRemux) {
+              if (remuxBtn) { remuxBtn.disabled = false; remuxBtn.textContent = '⬇ 转为 MP4'; }
+              ui.showToast(`MP4 转封装失败: ${m.error}`, 'error');
+            } else {
+              ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
+            }
         }
         resetUI();
-        setTimeout(renderUrls, 2500);
+        if (!isRemux) setTimeout(renderUrls, 2500);
     }
 }
