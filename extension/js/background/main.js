@@ -12,8 +12,8 @@ import { parseM3U8, parseMPD, parseHlsSegments, parseDashSegments } from './pars
 import {
   handleFfmpegMerge, handleProxyDownload, handleFfmpegRemux, handleAudioExtract,
   handleFfmpegDone, handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch,
-  dispatchToRecordOffscreen,  handleRecordOffscreenReady, closeRecordOffscreen,
-  getIsRecordActive, createRecordOffscreen,
+  dispatchToRecordOffscreen, handleRecordOffscreenReady, closeRecordOffscreen,
+  getIsRecordActive, createRecordOffscreen, closeOffscreen,
 } from './orchestrator.js';
 
 // ---------------------------------------------------------------------------
@@ -244,12 +244,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (type === 'RESET_GLOBAL_MERGE') {
       resetGlobalMergeStatus();
+      closeOffscreen();
       sendResponse({ ok: true });
     }
 
     if (type === 'CLEAR_URLS') {
       if (state.globalMergeStatus.isMerging) chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE' }).catch(() => { });
       resetGlobalMergeStatus();
+      closeOffscreen();
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) cleanTab(tabs[0].id);
         sendResponse({ status: 'cleared' });
@@ -485,12 +487,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (type === 'FFMPEG_COMPLETE' || type === 'FFMPEG_ERROR') {
       state.globalMergeStatus.isMerging = false;
       handleFfmpegDone();
+      
+      // Phase 9: Mandatory offscreen teardown after ANY task completes
+      // (Except in debug mode where we might want to keep it open for log inspection)
+      if (typeof DEBUG === 'undefined' || !DEBUG) {
+        closeOffscreen();
+      }
       chrome.action.setBadgeText({ text: '' }).catch(() => { });
       clearDnrRules().catch(logger.error);
       chrome.runtime.sendMessage(request).catch(() => { });
 
       // In DEBUG mode, we keep the offscreen document open so the user can inspect logs.
-      const closeOffscreen = () => {
+      const closeOffscreenConditional = () => {
         if (typeof DEBUG !== 'undefined' && DEBUG) {
           logger.info('DEBUG mode is ON: Keeping offscreen document open for log inspection.');
           return;

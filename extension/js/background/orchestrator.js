@@ -237,13 +237,19 @@ let _isFfmpegBusy = false;
 
 /**
  * Creates the persistent record.html offscreen document.
- * Returns false if another offscreen (FFmpeg) is already open.
+ * Returns false if another offscreen (FFmpeg) is already open and busy.
  */
 export async function createRecordOffscreen() {
   if (await chrome.offscreen.hasDocument()) {
-    logger.warn('Cannot create record offscreen: another offscreen document is already active');
-    return false;
+    if (_activeOffscreenType === 'ffmpeg') {
+      logger.warn('Cannot create record offscreen: FFmpeg merge is already active');
+      return false;
+    }
+    // If it's a stale record offscreen, force-recreate it to ensure fresh state
+    logger.info('[Orchestrator] Stale record offscreen detected, force-recreating.');
+    await chrome.offscreen.closeDocument().catch(() => {});
   }
+  
   isRecordOffscreenActive = true;
   _activeOffscreenType = 'record';
   await chrome.offscreen.createDocument({
@@ -298,6 +304,24 @@ export async function dispatchToRecordOffscreen(command) {
  * Called when record.html signals RECORD_OFFSCREEN_READY.
  * Flushes any pending command that was queued during document creation.
  */
+/**
+ * Force-close any active offscreen document and reset all state variables.
+ */
+export async function closeOffscreen() {
+  logger.info(`[Orchestrator] closeOffscreen() called. Closing current ${(_activeOffscreenType || 'unknown')} offscreen.`);
+  _activeOffscreenType    = null;
+  _isFfmpegBusy           = false;
+  isRecordOffscreenActive = false;
+  try {
+    if (await chrome.offscreen.hasDocument()) {
+      await chrome.offscreen.closeDocument();
+      logger.info('[Orchestrator] Offscreen document closed.');
+    }
+  } catch (err) {
+    logger.debug('[Orchestrator] closeDocument ignored:', err.message);
+  }
+}
+
 export function handleRecordOffscreenReady() {
   if (!pendingRecordCommand) return;
   chrome.runtime.sendMessage(pendingRecordCommand).catch(() => {});
