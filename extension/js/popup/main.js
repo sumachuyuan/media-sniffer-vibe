@@ -413,7 +413,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
                 if (stopBtn)  stopBtn.style.display = 'none';
                 if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-                if (dotEl) { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
+                if (dotEl) { 
+                    dotEl.style.background = '#444'; 
+                    dotEl.style.boxShadow = 'none'; 
+                    dotEl.classList.remove('record-indicator-breathing');
+                }
                 if (statsEl) {
                     statsEl.style.display = 'block';
                     statsEl.innerHTML = `<span style="color:#ffa726">${t('recordWaitingWrite')}</span>`;
