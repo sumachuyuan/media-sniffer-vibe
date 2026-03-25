@@ -33,11 +33,15 @@ let _prevBitrateReduced = false;
 let _isRemuxing = false;
 let _isAudioExtracting = false;
 
+// v1.48.6: dual-task interlock
+let _isRecordingActive = false; // true while tab capture is running
+let _startBtnLockedByTask = false; // true when Lock B disabled the record start button
+
 function formatElapsed(totalSeconds) {
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
     const s = Math.floor(totalSeconds % 60);
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 function startRecordingTimer(startTime) {
@@ -78,20 +82,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Phase 9.9.2: Proactively warm up the record offscreen to prevent focus-steal on 'Start' click.
     // Delaying slightly to allow initial popup render to settle.
     setTimeout(() => {
-        chrome.runtime.sendMessage({ type: 'PRE_WARM_RECORD_OFFSCREEN' }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'PRE_WARM_RECORD_OFFSCREEN' }).catch(() => { });
     }, 200);
 
     // 1. Initial Render & Status Sync
     renderUrls();
     syncMergeStatus();
 
-    // Phase 10: Proactive recovery sensor for orphaned large-file tasks
+    // Recovery sensor: if an export task was in-flight when the popup was closed,
+    // the double-trigger guard (in the isReady block below) will disable export buttons.
     chrome.storage.local.get('pendingExportTask', (res) => {
         if (res.pendingExportTask) {
-            const { filename } = res.pendingExportTask;
-            console.log(`[Popup] Orphaned export task detected for: ${filename}. Waiting for signal...`);
-            // We don't show a toast immediately to avoid clutter, 
-            // but the system is now ready to handle the signal with the correct name.
+            logger.info(`[Popup] Pending export task detected: ${res.pendingExportTask.filename}`);
         }
     });
 
@@ -118,12 +120,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 3. Restore start-btn; hide stop-btn; re-enable quality selector and audio-only toggle
         const startBtnEl = document.getElementById('record-start-btn');
-        const stopBtnEl  = document.getElementById('record-stop-btn');
-        const qualityEl  = document.getElementById('record-quality');
+        const stopBtnEl = document.getElementById('record-stop-btn');
+        const qualityEl = document.getElementById('record-quality');
         const audioOnlyEl = document.getElementById('record-audio-only');
         if (startBtnEl) { startBtnEl.disabled = false; startBtnEl.style.opacity = '1'; }
-        if (stopBtnEl)  { stopBtnEl.style.display = 'none'; }
-        if (qualityEl)  { qualityEl.disabled = false; qualityEl.style.opacity = '1'; qualityEl.style.display = ''; }
+        if (stopBtnEl) { stopBtnEl.style.display = 'none'; }
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; qualityEl.style.display = ''; }
         if (audioOnlyEl) { audioOnlyEl.disabled = false; }
 
         // 4. Hide stats panel and export buttons; clear in-memory filename
@@ -142,8 +144,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
 
         // 3. Clear persistence
-        chrome.storage.local.set({ recordingState: { isRecording: false, isReady: false, isConsolidating: false } }).catch(() => {});
-        
+        chrome.storage.local.set({ recordingState: { isRecording: false, isReady: false, isConsolidating: false } }).catch(() => { });
+
         // 4. Global Data Erasure
         chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' });
         chrome.runtime.sendMessage({ type: 'CLEAR_URLS' }, () => {
@@ -182,14 +184,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('searchBar').oninput = () => renderUrls();
 
     // --- Phase 4: Real tab capture + audio + resolution ---
-    const startBtn        = document.getElementById('record-start-btn');
-    const stopBtn         = document.getElementById('record-stop-btn');
-    const statsEl         = document.getElementById('record-stats');
-    const dotEl           = document.getElementById('record-indicator');
-    const qualityEl       = document.getElementById('record-quality');
-    const macosNotice     = document.getElementById('record-macos-notice');
-    const audioOnlyEl     = document.getElementById('record-audio-only');
-    const saveVideoBtn    = document.getElementById('record-save-video-btn');
+    const startBtn = document.getElementById('record-start-btn');
+    const stopBtn = document.getElementById('record-stop-btn');
+    const statsEl = document.getElementById('record-stats');
+    const dotEl = document.getElementById('record-indicator');
+    const qualityEl = document.getElementById('record-quality');
+    const macosNotice = document.getElementById('record-macos-notice');
+    const audioOnlyEl = document.getElementById('record-audio-only');
+    const saveVideoBtn = document.getElementById('record-save-video-btn');
     const extractAudioBtn = document.getElementById('record-extract-audio-btn');
 
     // Show macOS audio notice on macOS
@@ -198,16 +200,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Phase 8: audio-only toggle — hide quality selector and macOS notice when active
     audioOnlyEl?.addEventListener('change', () => {
-      const on = audioOnlyEl.checked;
-      if (qualityEl) qualityEl.style.display = on ? 'none' : '';
-      if (macosNotice) macosNotice.style.display = (on || !_isMacOS) ? 'none' : 'block';
-      // Store user preference for NEXT recording
-      chrome.storage.local.set({ 'recordAudioOnlyPref': on }).catch(() => {});
+        const on = audioOnlyEl.checked;
+        if (qualityEl) qualityEl.style.display = on ? 'none' : '';
+        if (macosNotice) macosNotice.style.display = (on || !_isMacOS) ? 'none' : 'block';
+        // Store user preference for NEXT recording
+        chrome.storage.local.set({ 'recordAudioOnlyPref': on }).catch(() => { });
     });
 
     // Persist quality selection across popup opens
     qualityEl?.addEventListener('change', () => {
-      chrome.storage.local.set({ 'recordQualityPref': qualityEl.value }).catch(() => {});
+        chrome.storage.local.set({ 'recordQualityPref': qualityEl.value }).catch(() => { });
     });
 
     // Step 0: Pre-fetch tab ID to ensure user gesture context in startBtn.onclick
@@ -217,159 +219,156 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     startBtn.onclick = async () => {
-      if (startBtn.disabled) return;
-      startBtn.disabled = true;
-      startBtn.style.opacity = '0.4';
+        if (startBtn.disabled) return;
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.4';
 
-      // Phase 9.9.2: Direct start. Offscreen should already be pre-warmed.
-      _startRecordingFlow(activeTabId);
+        // Phase 9.9.2: Direct start. Offscreen should already be pre-warmed.
+        _startRecordingFlow(activeTabId);
     };
 
     const _startRecordingFlow = (tabId) => {
-      startBtn.disabled = true;
-      startBtn.style.opacity = '0.4';
-      if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-      if (audioOnlyEl) audioOnlyEl.disabled = true;
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.4';
+        if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
+        if (audioOnlyEl) audioOnlyEl.disabled = true;
 
-      // Phase 8.4: Reset UI elements from previous recording session
-      if (saveVideoBtn) saveVideoBtn.style.display = 'none';
-      if (extractAudioBtn) extractAudioBtn.style.display = 'none';
-      if (stopBtn) {
-        stopBtn.style.display = 'inline-block';
-        stopBtn.disabled = true;
-        stopBtn.style.cursor = 'not-allowed';
-      }
-      if (statsEl) {
+        // Phase 8.4: Reset UI elements from previous recording session
+        if (saveVideoBtn) saveVideoBtn.style.display = 'none';
+        if (extractAudioBtn) extractAudioBtn.style.display = 'none';
+        if (stopBtn) {
+            stopBtn.style.display = 'inline-block';
+            stopBtn.disabled = true;
+            stopBtn.style.cursor = 'not-allowed';
+        }
+        if (statsEl) {
+            statsEl.style.display = 'block';
+            statsEl.innerHTML = `<span style="color:#00e676">${t('recordWaitingStats')}</span>`;
+        }
+
+        // Phase 9: Silent start — no showSaveFilePicker here.
+        const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+        const suggestedName = `vibe_recording_${ts}.webm`;
+
+        const isAudioOnly = audioOnlyEl?.checked || false;
+        const quality = isAudioOnly ? '1080P' : (qualityEl?.value || '1080P');
+
+        state.recordFileHandle = null; // No handle yet
+        state.recordFilename = suggestedName;
+        state.isAudioOnly = isAudioOnly;
+
+        // Phase 8.2: Clear any stale "ready" state before starting a new recording
+        chrome.storage.local.set({ recordingState: { isRecording: true, isReady: false } }).catch(() => { });
+
+        // Phase 9: Start record — background SW will call getMediaStreamId internally
+        // so the streamId is usable by the offscreen document.
+        chrome.runtime.sendMessage({ type: 'START_RECORD_TEST', targetTabId: tabId, quality, filename: suggestedName, isAudioOnly });
+        startRecordingTimer(Date.now());
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.4';
+        if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
+        stopBtn.disabled = false;
+        stopBtn.style.cursor = 'pointer';
+        stopBtn.style.color = '#ff5252';
+        stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
+        stopBtn.style.background = 'rgba(255,60,60,0.08)';
+        dotEl.style.background = '#ff5252';
+        dotEl.style.boxShadow = '0 0 6px #ff5252';
+        dotEl.classList.add('record-indicator-breathing');
         statsEl.style.display = 'block';
-        statsEl.innerHTML = `<span style="color:#00e676">${t('recordWaitingStats')}</span>`;
-      }
-
-      // Phase 9: Silent start — no showSaveFilePicker here.
-      const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
-      const suggestedName = `vibe_recording_${ts}.webm`;
-
-      const isAudioOnly = audioOnlyEl?.checked || false;
-      const quality = isAudioOnly ? '1080P' : (qualityEl?.value || '1080P');
-
-      state.recordFileHandle = null; // No handle yet
-      state.recordFilename = suggestedName;
-      state.isAudioOnly = isAudioOnly;
-
-      // Phase 8.2: Clear any stale "ready" state before starting a new recording
-      chrome.storage.local.set({ recordingState: { isRecording: true, isReady: false } }).catch(() => {});
-
-      // Phase 9: Start record — background SW will call getMediaStreamId internally
-      // so the streamId is usable by the offscreen document.
-      chrome.runtime.sendMessage({ type: 'START_RECORD_TEST', targetTabId: tabId, quality, filename: suggestedName, isAudioOnly });
-      startRecordingTimer(Date.now());
-      startBtn.disabled = true;
-      startBtn.style.opacity = '0.4';
-      if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-      stopBtn.disabled = false;
-      stopBtn.style.cursor = 'pointer';
-      stopBtn.style.color = '#ff5252';
-      stopBtn.style.borderColor = 'rgba(255,60,60,0.3)';
-      stopBtn.style.background = 'rgba(255,60,60,0.08)';
-      dotEl.style.background = '#ff5252';
-      dotEl.style.boxShadow = '0 0 6px #ff5252';
-      dotEl.classList.add('record-indicator-breathing');
-      statsEl.style.display = 'block';
-      statsEl.innerHTML =
-        t('recordWaitingEncoder') +
-        `&nbsp;&nbsp;<span style="color:#555">${quality}</span>`;
+        statsEl.innerHTML =
+            t('recordWaitingEncoder') +
+            `&nbsp;&nbsp;<span style="color:#555">${quality}</span>`;
+        // Lock A: prevent URL list actions while recording
+        _isRecordingActive = true;
+        _applyGlobalLock();
     };
 
     stopBtn.onclick = () => {
-      chrome.runtime.sendMessage({ type: 'STOP_RECORD_TEST' });
-      stopRecordingTimer();
-      stopBtn.disabled = true;
-      stopBtn.style.cursor = 'not-allowed';
-      stopBtn.style.color = '#444';
-      stopBtn.style.borderColor = 'rgba(255,255,255,0.08)';
-      stopBtn.style.background = 'rgba(255,255,255,0.03)';
-      dotEl.style.background = '#888';
-      dotEl.style.boxShadow = 'none';
-      dotEl.classList.remove('record-indicator-breathing');
-      if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+        chrome.runtime.sendMessage({ type: 'STOP_RECORD_TEST' });
+        stopRecordingTimer();
+        stopBtn.disabled = true;
+        stopBtn.style.cursor = 'not-allowed';
+        stopBtn.style.color = '#444';
+        stopBtn.style.borderColor = 'rgba(255,255,255,0.08)';
+        stopBtn.style.background = 'rgba(255,255,255,0.03)';
+        dotEl.style.background = '#888';
+        dotEl.style.boxShadow = 'none';
+        dotEl.classList.remove('record-indicator-breathing');
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
     };
 
     // Phase 8: export button handlers (shown after RECORD_STOPPED, enabled after RECORD_BLOB_READY)
     if (saveVideoBtn) {
-      saveVideoBtn.onclick = async () => {
-        if (saveVideoBtn.disabled) return;
-        
-        // Phase 9: Deferred File Picker for MP4
-        try {
-          const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
-          const handle = await window.showSaveFilePicker({
-            suggestedName: `vibe_recording_${ts}.mp4`,
-            types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
-          });
-          await saveFileHandle(handle);
-          // Phase 10: Persist filename to storage for fallback/resume naming sync
-          chrome.storage.local.set({ 
-            pendingExportTask: { type: 'video', filename: handle.name } 
-          }).catch(() => {});
-          
-          _pendingRecordWritable = await handle.createWritable();
-        } catch (err) {
-          if (err.name === 'AbortError') return;
-          ui.showToast(`${t('error')}: ${err.message}`, 'error');
-          return;
-        }
+        saveVideoBtn.onclick = async () => {
+            if (saveVideoBtn.disabled) return;
 
-        _isRemuxing = true;
-        saveVideoBtn.disabled = true;
-        saveVideoBtn.style.opacity = '0.5';
-        saveVideoBtn.textContent = t('recordSaveVideo') + '...';
-        if (extractAudioBtn) {
-           extractAudioBtn.disabled = true;
-           extractAudioBtn.style.opacity = '0.5';
-        }
-        chrome.runtime.sendMessage({
-          type: 'START_WEBM_REMUX',
-          outputName: state.recordFilename || 'recording.mp4'
-        });
-      };
+            // Phase 9: Deferred File Picker for MP4
+            try {
+                const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: `vibe_recording_${ts}.mp4`,
+                    types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
+                });
+                await saveFileHandle(handle);
+                chrome.storage.local.set({ pendingExportTask: { type: 'video', filename: handle.name } }).catch(() => { });
+                chrome.runtime.sendMessage({ type: 'EXPORT_PICKER_OPENED' }).catch(() => { });
+                _pendingRecordWritable = await handle.createWritable();
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                ui.showToast(`${t('error')}: ${err.message}`, 'error');
+                return;
+            }
+
+            _isRemuxing = true;
+            saveVideoBtn.disabled = true;
+            saveVideoBtn.style.opacity = '0.5';
+            saveVideoBtn.textContent = t('recordSaveVideo') + '...';
+            if (extractAudioBtn) {
+                extractAudioBtn.disabled = true;
+                extractAudioBtn.style.opacity = '0.5';
+            }
+            chrome.runtime.sendMessage({
+                type: 'START_WEBM_REMUX',
+                outputName: state.recordFilename || 'recording.mp4'
+            });
+        };
     }
 
     if (extractAudioBtn) {
-      extractAudioBtn.onclick = async () => {
-        if (extractAudioBtn.disabled) return;
+        extractAudioBtn.onclick = async () => {
+            if (extractAudioBtn.disabled) return;
 
-        // Phase 9: Deferred File Picker for MP3
-        try {
-          const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
-          const handle = await window.showSaveFilePicker({
-            suggestedName: `vibe_recording_${ts}.mp3`,
-            types: [{ description: 'MP3 Audio', accept: { 'audio/mpeg': ['.mp3'] } }],
-          });
-          await saveFileHandle(handle);
-          // Phase 10: Persist filename to storage for fallback/resume naming sync
-          chrome.storage.local.set({ 
-            pendingExportTask: { type: 'audio', filename: handle.name } 
-          }).catch(() => {});
+            // Phase 9: Deferred File Picker for MP3
+            try {
+                const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: `vibe_recording_${ts}.mp3`,
+                    types: [{ description: 'MP3 Audio', accept: { 'audio/mpeg': ['.mp3'] } }],
+                });
+                await saveFileHandle(handle);
+                chrome.storage.local.set({ pendingExportTask: { type: 'audio', filename: handle.name } }).catch(() => { });
+                chrome.runtime.sendMessage({ type: 'EXPORT_PICKER_OPENED' }).catch(() => { });
+                _pendingRecordWritable = await handle.createWritable();
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                ui.showToast(`${t('error')}: ${err.message}`, 'error');
+                return;
+            }
 
-          _pendingRecordWritable = await handle.createWritable();
-        } catch (err) {
-          if (err.name === 'AbortError') return;
-          ui.showToast(`${t('error')}: ${err.message}`, 'error');
-          return;
-        }
-
-        _isAudioExtracting = true;
-        extractAudioBtn.disabled = true;
-        extractAudioBtn.style.opacity = '0.5';
-        extractAudioBtn.textContent = t('recordExtracting');
-        if (saveVideoBtn) {
-           saveVideoBtn.disabled = true;
-           saveVideoBtn.style.opacity = '0.5';
-        }
-        chrome.runtime.sendMessage({
-          type: 'START_AUDIO_EXTRACT',
-          outputName: state.recordFilename || 'recording.mp3'
-        });
-      };
+            _isAudioExtracting = true;
+            extractAudioBtn.disabled = true;
+            extractAudioBtn.style.opacity = '0.5';
+            extractAudioBtn.textContent = t('recordExtracting');
+            if (saveVideoBtn) {
+                saveVideoBtn.disabled = true;
+                saveVideoBtn.style.opacity = '0.5';
+            }
+            chrome.runtime.sendMessage({
+                type: 'START_AUDIO_EXTRACT',
+                outputName: state.recordFilename || 'recording.mp3'
+            });
+        };
     }
 
     document.getElementById('global-cancel-btn').onclick = () => {
@@ -402,12 +401,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const heartbeatStale = lastHb > 0 && (Date.now() - lastHb) > 15000;
                 if (!backendActive || heartbeatStale) {
                     // Stale / crashed state — reset everything.
-                    chrome.storage.local.set({ recordingState: { isRecording: false, isConsolidating: false }, recordLastHeartbeat: 0 }).catch(() => {});
+                    chrome.storage.local.set({ recordingState: { isRecording: false, isConsolidating: false }, recordLastHeartbeat: 0 }).catch(() => { });
                     chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' });
                     return;
                 }
 
                 // Recording is genuinely in progress — restore UI to active state
+                _isRecordingActive = true;
                 if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
                 if (stopBtn) {
                     stopBtn.disabled = false;
@@ -417,9 +417,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     stopBtn.style.background = 'rgba(255,60,60,0.08)';
                 }
                 if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-                if (dotEl) { 
-                    dotEl.style.background = '#ff5252'; 
-                    dotEl.style.boxShadow = '0 0 6px #ff5252'; 
+                if (dotEl) {
+                    dotEl.style.background = '#ff5252';
+                    dotEl.style.boxShadow = '0 0 6px #ff5252';
                     dotEl.classList.add('record-indicator-breathing');
                 }
                 if (statsEl) {
@@ -436,11 +436,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Show a "writing..." notice; export buttons remain disabled.
             if (rs?.isConsolidating) {
                 if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
-                if (stopBtn)  stopBtn.style.display = 'none';
+                if (stopBtn) stopBtn.style.display = 'none';
                 if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-                if (dotEl) { 
-                    dotEl.style.background = '#444'; 
-                    dotEl.style.boxShadow = 'none'; 
+                if (dotEl) {
+                    dotEl.style.background = '#444';
+                    dotEl.style.boxShadow = 'none';
                     dotEl.classList.remove('record-indicator-breathing');
                 }
                 if (statsEl) {
@@ -457,12 +457,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
                 if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
-                if (dotEl) { 
-                    dotEl.style.background = '#444'; 
-                    dotEl.style.boxShadow = 'none'; 
+                if (dotEl) {
+                    dotEl.style.background = '#444';
+                    dotEl.style.boxShadow = 'none';
                     dotEl.classList.remove('record-indicator-breathing');
                 }
-                
+
                 if (stopBtn) stopBtn.style.display = 'none';
                 if (saveVideoBtn) {
                     saveVideoBtn.style.display = state.lastRecordIsAudioOnly ? 'none' : 'inline-block';
@@ -480,11 +480,30 @@ document.addEventListener('DOMContentLoaded', async () => {
                     statsEl.style.display = 'block';
                     const tsMessage = rs.stoppedAt ? `<br><span style="color:#555;font-size:10px;">${new Date(rs.stoppedAt).toLocaleTimeString()}</span>` : '';
                     statsEl.innerHTML = `<span style="color:#29b6f6">${t('recordFileWritten', [rs.filename])}</span>` +
-                                       `<br><span style="color:#ffa726">${t('recordDataReady')}</span>` + tsMessage;
+                        `<br><span style="color:#ffa726">${t('recordDataReady')}</span>` + tsMessage;
                 }
+
+                // Double-trigger guard: if an export is already in-flight (picker was
+                // opened before popup closed), lock the buttons instead of re-enabling.
+                chrome.storage.local.get('pendingExportTask', (taskRes) => {
+                    if (!taskRes.pendingExportTask) return;
+                    const busyText = '正在写入中...';
+                    if (saveVideoBtn && saveVideoBtn.style.display !== 'none') {
+                        saveVideoBtn.disabled = true;
+                        saveVideoBtn.style.opacity = '0.5';
+                        saveVideoBtn.style.cursor = 'not-allowed';
+                        saveVideoBtn.textContent = busyText;
+                    }
+                    if (extractAudioBtn && extractAudioBtn.style.display !== 'none') {
+                        extractAudioBtn.disabled = true;
+                        extractAudioBtn.style.opacity = '0.5';
+                        extractAudioBtn.style.cursor = 'not-allowed';
+                        extractAudioBtn.textContent = busyText;
+                    }
+                });
             }
         });
-        
+
         // Phase 8.5: Independently restore toggle + quality preferences for NEXT recording
         chrome.storage.local.get(['recordAudioOnlyPref', 'recordQualityPref'], (res) => {
             const on = !!res?.recordAudioOnlyPref;
@@ -499,7 +518,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
- // Primary message listener moved to end of file for better scope management
+    // Primary message listener moved to end of file for better scope management
 });
 
 function resetUI() {
@@ -507,6 +526,107 @@ function resetUI() {
     state.mergingProgress = 0;
     state.mergingStage = '';
     ui.hideMergeBanner();
+    _applyGlobalLock(); // release Lock B immediately when merge ends
+}
+
+/**
+ * Shows a brief yellow warning to the user when they interact with a locked button.
+ * Updates both the toast system and the merge-banner status line (if banner is visible).
+ */
+function _showConflictWarning() {
+    const MSG = '任务处理中，请等待完成后再进行此操作';
+    ui.showToast(MSG, 'conflict-warn');
+    const msgEl = document.getElementById('global-msg');
+    const banner = document.getElementById('global-merge-banner');
+    if (msgEl && banner && banner.style.display !== 'none') {
+        const prevText = msgEl.textContent;
+        const prevColor = msgEl.style.color;
+        msgEl.textContent = MSG;
+        msgEl.style.color = 'var(--gold-primary)';
+        setTimeout(() => {
+            if (msgEl.textContent === MSG) {
+                msgEl.textContent = prevText;
+                msgEl.style.color = prevColor;
+            }
+        }, 2500);
+    }
+    logger.info('[UI] Conflict warning shown to user.');
+}
+
+/**
+ * Applies / releases UI task interlocks after state changes.
+ *
+ * Lock A — Recording or export-remux active:
+ *   Disables merge, download, snapshot buttons in the URL list so the user
+ *   cannot queue a second concurrent FFmpeg job.
+ *
+ * Lock B — Any merge/export active (state.mergingUrl OR _isRemuxing/_isAudioExtracting):
+ *   Disables the record start button so a new capture cannot preempt an in-flight
+ *   FFmpeg task.
+ *
+ * Call this after: renderUrls(), resetUI(), recording state changes, export completion.
+ */
+function _applyGlobalLock() {
+    const CONFLICT_TIP = '任务处理中，请等待完成后再进行此操作';
+    const isMergeExportActive = !!state.mergingUrl || _isRemuxing || _isAudioExtracting;
+
+    // ── Lock A ─────────────────────────────────────────────────────────────────
+    // When recording is active OR a remux/extract is in progress, the URL-list
+    // action buttons still exist in the DOM (state.mergingUrl is null for these cases)
+    // and must be explicitly disabled.
+    if (_isRecordingActive || _isRemuxing || _isAudioExtracting) {
+        document.querySelectorAll('.native-merge, .direct-download, .quality-tag, .play-btn').forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.4';
+            btn.style.cursor = 'not-allowed';
+            btn.title = CONFLICT_TIP;
+            // mousedown fires even on disabled buttons (no pointer-events:none) so we
+            // can surface the warning the moment the user tries to interact.
+            if (!btn.__warnBound) {
+                btn.__warnBound = true;
+                btn.addEventListener('mousedown', _showConflictWarning);
+            }
+        });
+        const compMerge = document.getElementById('compMerge');
+        if (compMerge) {
+            compMerge.disabled = true;
+            compMerge.style.opacity = '0.4';
+            compMerge.style.cursor = 'not-allowed';
+            compMerge.title = CONFLICT_TIP;
+            if (!compMerge.__warnBound) {
+                compMerge.__warnBound = true;
+                compMerge.addEventListener('mousedown', _showConflictWarning);
+            }
+        }
+    }
+
+    // ── Lock B ─────────────────────────────────────────────────────────────────
+    const startBtnEl = document.getElementById('record-start-btn');
+    if (startBtnEl) {
+        if (isMergeExportActive && !startBtnEl.disabled) {
+            // Engage: disable start button for the duration of the merge/export
+            startBtnEl.disabled = true;
+            startBtnEl.style.opacity = '0.4';
+            startBtnEl.style.cursor = 'not-allowed';
+            startBtnEl.title = CONFLICT_TIP;
+            if (!startBtnEl.__warnBound) {
+                startBtnEl.__warnBound = true;
+                startBtnEl.addEventListener('mousedown', _showConflictWarning);
+            }
+            _startBtnLockedByTask = true;
+        } else if (!isMergeExportActive && _startBtnLockedByTask) {
+            // Release: restore start button when all merge/export tasks are done
+            startBtnEl.disabled = false;
+            startBtnEl.style.opacity = '1';
+            startBtnEl.style.cursor = '';
+            startBtnEl.title = '';
+            if (startBtnEl.__warnBound) {
+                startBtnEl.removeEventListener('mousedown', _showConflictWarning);
+                startBtnEl.__warnBound = false;
+            }
+            _startBtnLockedByTask = false;
+        }
+    }
 }
 
 function syncMergeStatus() {
@@ -583,6 +703,7 @@ function renderUrls() {
                 list.appendChild(itemEl);
             });
             bindEvents(currentTab);
+            _applyGlobalLock();
         });
     });
 }
@@ -590,7 +711,7 @@ function renderUrls() {
 function bindEvents(tab) {
     document.querySelectorAll('.native-merge').forEach(btn => {
         btn.onclick = () => {
-            if (state.mergingUrl) return;
+            if (state.mergingUrl || _isRecordingActive) { _showConflictWarning(); return; }
 
             const estimatedSize = parseInt(btn.dataset.estimatedSize || '0');
             if (estimatedSize > 1.5 * 1024 * 1024 * 1024) {
@@ -619,6 +740,7 @@ function bindEvents(tab) {
     document.querySelectorAll('.copy-btn').forEach(btn => btn.onclick = () => copyToClipboard(btn.dataset.url, () => ui.showToast(t('toastUrlCopied'))));
     document.querySelectorAll('.direct-download').forEach(btn => {
         btn.onclick = () => {
+            if (_isRecordingActive) { _showConflictWarning(); return; }
             ui.showToast(t('toastDownloadStarted'), 'ffmpeg');
             chrome.runtime.sendMessage({ type: 'START_DIRECT_DOWNLOAD', url: btn.dataset.url, filename: btn.dataset.filename, referer: tab.url, ua: state.ua });
         };
@@ -631,7 +753,7 @@ function bindEvents(tab) {
     document.querySelectorAll('.quality-tag').forEach(tag => {
         tag.onclick = (e) => {
             e.stopPropagation();
-            if (state.mergingUrl) return;
+            if (state.mergingUrl || _isRecordingActive) { _showConflictWarning(); return; }
             const masterUrl = tag.dataset.url, qUrl = tag.dataset.qualityUrl, fname = tag.dataset.filename, res = tag.dataset.res;
             ui.showToast(t('targeting', [res]), 'ffmpeg');
             chrome.runtime.sendMessage({ type: 'GET_SEGMENTS', url: qUrl }, (data) => {
@@ -750,157 +872,161 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
 function handleRuntimeMessages(m, sender, sendResponse) {
     // --- Phase 2: WebCodecs encoding stats ---
     if (m.type === 'RECORD_HW_CHECK') {
-      const statsEl = document.getElementById('record-stats');
-      if (!statsEl) return;
-      const modeColor = m.mode === 'HW' ? '#00e676' : '#ffb300';
-      const modeLabel = m.mode === 'HW' ? t('recordGpuHw') : t('recordSoftSw');
-      statsEl.style.display = 'block';
-      statsEl.innerHTML =
-        `${t('recordEncoderReady')} &nbsp;` +
-        `<b style="color:${modeColor};padding:1px 5px;border:1px solid ${modeColor};border-radius:3px;font-size:8px;">${modeLabel}</b>` +
-        `&nbsp;&nbsp;<span style="color:#555">${m.codec}</span>`;
-      return;
+        const statsEl = document.getElementById('record-stats');
+        if (!statsEl) return;
+        const modeColor = m.mode === 'HW' ? '#00e676' : '#ffb300';
+        const modeLabel = m.mode === 'HW' ? t('recordGpuHw') : t('recordSoftSw');
+        statsEl.style.display = 'block';
+        statsEl.innerHTML =
+            `${t('recordEncoderReady')} &nbsp;` +
+            `<b style="color:${modeColor};padding:1px 5px;border:1px solid ${modeColor};border-radius:3px;font-size:8px;">${modeLabel}</b>` +
+            `&nbsp;&nbsp;<span style="color:#555">${m.codec}</span>`;
+        return;
     }
     if (m.type === 'RECORD_STATS') {
-      const s = m.stats;
-      const statsEl = document.getElementById('record-stats');
-      if (!statsEl) return;
+        const s = m.stats;
+        const statsEl = document.getElementById('record-stats');
+        if (!statsEl) return;
 
-      const elapsedStr = formatElapsed(s.elapsed || 0);
-      // Sync timer element with worker's authoritative elapsed value
-      const timerEl = document.getElementById('record-timer');
-      if (timerEl && timerEl.style.display !== 'none') timerEl.textContent = elapsedStr;
+        const elapsedStr = formatElapsed(s.elapsed || 0);
+        // Sync timer element with worker's authoritative elapsed value
+        const timerEl = document.getElementById('record-timer');
+        if (timerEl && timerEl.style.display !== 'none') timerEl.textContent = elapsedStr;
 
-      // Phase 8: audio-only mode — show compact audio-only stats
-      if (state.isAudioOnly) {
+        // Phase 8: audio-only mode — show compact audio-only stats
+        if (state.isAudioOnly) {
+            const finalLine = s.final
+                ? `<br><span style="color:#aaa">总录音: <b>${s.writtenMB} MB</b></span>`
+                : '';
+            statsEl.innerHTML =
+                `audio: <b style="color:#ab47bc">${s.audioEncodedCount || 0} pkts</b>` +
+                `&nbsp;&nbsp;written: <b style="color:#29b6f6">${s.writtenMB} MB</b>` +
+                `<br>elapsed: <b style="color:#aaa">${elapsedStr}</b>` +
+                finalLine;
+            return;
+        }
+
+        const modeColor = s.encoderMode === 'HW' ? '#00e676' : '#ffb300';
+        const modeLabel = s.encoderMode === 'HW' ? t('recordGpuHw') : t('recordSoftSw');
+        const audioLine = s.hasAudio
+            ? `&nbsp;&nbsp;audio: <b style="color:#ab47bc">${s.audioEncodedCount || 0} pkts</b>`
+            : '';
+        const pendingMB = parseFloat(s.pendingMB || 0);
+        const bufColor = s.bitrateReduced ? '#f44336' : (pendingMB > 10 ? '#ffb300' : '#555');
+        const bufLine = pendingMB > 0.1
+            ? `&nbsp;&nbsp;buf: <b style="color:${bufColor}">${s.pendingMB} MB${s.bitrateReduced ? ' ⚠' : ''}</b>`
+            : '';
+        // I/O recovery toast: bitrateReduced true→false
+        if (_prevBitrateReduced && !s.bitrateReduced) {
+            ui.showToast(t('recordIoRecovered'));
+        }
+        _prevBitrateReduced = !!s.bitrateReduced;
+
         const finalLine = s.final
-          ? `<br><span style="color:#aaa">总录音: <b>${s.writtenMB} MB</b></span>`
-          : '';
+            ? `<br><span style="color:#aaa">总编码: <b>${s.totalEncodedMB} MB</b></span>`
+            : '';
         statsEl.innerHTML =
-          `audio: <b style="color:#ab47bc">${s.audioEncodedCount || 0} pkts</b>` +
-          `&nbsp;&nbsp;written: <b style="color:#29b6f6">${s.writtenMB} MB</b>` +
-          `<br>elapsed: <b style="color:#aaa">${elapsedStr}</b>` +
-          finalLine;
+            `frames: <b style="color:#00e676">${s.frameCount}</b>` +
+            `&nbsp;&nbsp;encoded: <b style="color:#00e676">${s.encodedCount}</b>` +
+            `&nbsp;&nbsp;keys: <b style="color:#aaa">${s.keyframeCount}</b>` +
+            audioLine +
+            `<br>fps: <b style="color:#00e676">${s.instantFps}</b> (avg ${s.avgFps})` +
+            `&nbsp;&nbsp;bitrate: <b style="color:${s.bitrateReduced ? '#f44336' : '#ffb300'}">${s.bitrateKbps} kbps${s.bitrateReduced ? ' ↓' : ''}</b>` +
+            `<br>written: <b style="color:#29b6f6">${s.writtenMB} MB</b>` +
+            bufLine +
+            `&nbsp;&nbsp;res: <b style="color:#aaa">${s.resolution}</b>` +
+            `&nbsp;&nbsp;mode: <b style="color:${modeColor}">${modeLabel}</b>` +
+            `<br>elapsed: <b style="color:#aaa">${elapsedStr}</b>` +
+            finalLine;
         return;
-      }
-
-      const modeColor = s.encoderMode === 'HW' ? '#00e676' : '#ffb300';
-      const modeLabel = s.encoderMode === 'HW' ? t('recordGpuHw') : t('recordSoftSw');
-      const audioLine = s.hasAudio
-        ? `&nbsp;&nbsp;audio: <b style="color:#ab47bc">${s.audioEncodedCount || 0} pkts</b>`
-        : '';
-      const pendingMB = parseFloat(s.pendingMB || 0);
-      const bufColor = s.bitrateReduced ? '#f44336' : (pendingMB > 10 ? '#ffb300' : '#555');
-      const bufLine = pendingMB > 0.1
-        ? `&nbsp;&nbsp;buf: <b style="color:${bufColor}">${s.pendingMB} MB${s.bitrateReduced ? ' ⚠' : ''}</b>`
-        : '';
-      // I/O recovery toast: bitrateReduced true→false
-      if (_prevBitrateReduced && !s.bitrateReduced) {
-        ui.showToast(t('recordIoRecovered'));
-      }
-      _prevBitrateReduced = !!s.bitrateReduced;
-
-      const finalLine = s.final
-        ? `<br><span style="color:#aaa">总编码: <b>${s.totalEncodedMB} MB</b></span>`
-        : '';
-      statsEl.innerHTML =
-        `frames: <b style="color:#00e676">${s.frameCount}</b>` +
-        `&nbsp;&nbsp;encoded: <b style="color:#00e676">${s.encodedCount}</b>` +
-        `&nbsp;&nbsp;keys: <b style="color:#aaa">${s.keyframeCount}</b>` +
-        audioLine +
-        `<br>fps: <b style="color:#00e676">${s.instantFps}</b> (avg ${s.avgFps})` +
-        `&nbsp;&nbsp;bitrate: <b style="color:${s.bitrateReduced ? '#f44336' : '#ffb300'}">${s.bitrateKbps} kbps${s.bitrateReduced ? ' ↓' : ''}</b>` +
-        `<br>written: <b style="color:#29b6f6">${s.writtenMB} MB</b>` +
-        bufLine +
-        `&nbsp;&nbsp;res: <b style="color:#aaa">${s.resolution}</b>` +
-        `&nbsp;&nbsp;mode: <b style="color:${modeColor}">${modeLabel}</b>` +
-        `<br>elapsed: <b style="color:#aaa">${elapsedStr}</b>` +
-        finalLine;
-      return;
     }
     if (m.type === 'RECORD_STOPPED') {
-      stopRecordingTimer();
-      _prevBitrateReduced = false;
-      const statsEl         = document.getElementById('record-stats');
-      const startBtn        = document.getElementById('record-start-btn');
-      const stopBtnEl       = document.getElementById('record-stop-btn');
-      const qualityEl       = document.getElementById('record-quality');
-      const dotEl           = document.getElementById('record-indicator');
-      const saveVideoBtnEl  = document.getElementById('record-save-video-btn');
-      const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
-      const audioOnlyEl     = document.getElementById('record-audio-only');
-      if (statsEl) statsEl.innerHTML =
-        `<br><span style="color:#29b6f6">${t('recordFileWritten', [m.filename || '—'])}</span>` +
-        `<br><span style="color:#ff5252">${t('recordStoppedTotal', [m.totalFrames])}</span>` +
-        `<br><span style="color:#ffa726">${t('recordWaitingWrite')}</span>`;
-      if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
-      if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
-      if (dotEl)    { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
-      if (m.filename) state.recordFilename = m.filename;
-      state.lastRecordIsAudioOnly = !!m.isAudioOnly;
+        _isRecordingActive = false;
+        stopRecordingTimer();
+        _prevBitrateReduced = false;
+        const statsEl = document.getElementById('record-stats');
+        const startBtn = document.getElementById('record-start-btn');
+        const stopBtnEl = document.getElementById('record-stop-btn');
+        const qualityEl = document.getElementById('record-quality');
+        const dotEl = document.getElementById('record-indicator');
+        const saveVideoBtnEl = document.getElementById('record-save-video-btn');
+        const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+        const audioOnlyEl = document.getElementById('record-audio-only');
+        if (statsEl) statsEl.innerHTML =
+            `<br><span style="color:#29b6f6">${t('recordFileWritten', [m.filename || '—'])}</span>` +
+            `<br><span style="color:#ff5252">${t('recordStoppedTotal', [m.totalFrames])}</span>` +
+            `<br><span style="color:#ffa726">${t('recordWaitingWrite')}</span>`;
+        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+        if (dotEl) { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
+        if (m.filename) state.recordFilename = m.filename;
+        state.lastRecordIsAudioOnly = !!m.isAudioOnly;
 
-      // Phase 8: swap stop button for export buttons (disabled until IDB write completes)
-      if (stopBtnEl) stopBtnEl.style.display = 'none';
-      if (saveVideoBtnEl) {
-        saveVideoBtnEl.style.display = state.lastRecordIsAudioOnly ? 'none' : 'inline-block';
-        saveVideoBtnEl.disabled = true;
-        saveVideoBtnEl.style.opacity = '0.3';
-        saveVideoBtnEl.style.cursor = 'not-allowed';
-      }
-      if (extractAudioBtnEl) {
-        extractAudioBtnEl.style.display = 'inline-block';
-        extractAudioBtnEl.disabled = true;
-        extractAudioBtnEl.style.opacity = '0.3';
-        extractAudioBtnEl.style.cursor = 'not-allowed';
-      }
-      if (audioOnlyEl) {
-        // Do NOT overwrite audioOnlyEl.checked based on result mode!
-        // The toggle should remain at user's desired preference for NEXT and stay interactive.
-        audioOnlyEl.disabled = false; 
-      }
-      return;
+        // Phase 8: swap stop button for export buttons (disabled until IDB write completes)
+        if (stopBtnEl) stopBtnEl.style.display = 'none';
+        if (saveVideoBtnEl) {
+            saveVideoBtnEl.style.display = state.lastRecordIsAudioOnly ? 'none' : 'inline-block';
+            saveVideoBtnEl.disabled = true;
+            saveVideoBtnEl.style.opacity = '0.3';
+            saveVideoBtnEl.style.cursor = 'not-allowed';
+        }
+        if (extractAudioBtnEl) {
+            extractAudioBtnEl.style.display = 'inline-block';
+            extractAudioBtnEl.disabled = true;
+            extractAudioBtnEl.style.opacity = '0.3';
+            extractAudioBtnEl.style.cursor = 'not-allowed';
+        }
+        if (audioOnlyEl) {
+            // Do NOT overwrite audioOnlyEl.checked based on result mode!
+            // The toggle should remain at user's desired preference for NEXT and stay interactive.
+            audioOnlyEl.disabled = false;
+        }
+        renderUrls(); // rebuild URL list so Lock A is lifted
+        return;
     }
     if (m.type === 'RECORD_BLOB_READY') {
-      // IDB write confirmed — enable export buttons
-      const saveVideoBtnEl    = document.getElementById('record-save-video-btn');
-      const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
-      const statsEl           = document.getElementById('record-stats');
-      if (m.filename) state.recordFilename = m.filename;
-      if (saveVideoBtnEl) {
-        saveVideoBtnEl.disabled = false;
-        saveVideoBtnEl.style.opacity = '1';
-        saveVideoBtnEl.style.cursor = 'pointer';
-      }
-      if (extractAudioBtnEl) {
-        extractAudioBtnEl.disabled = false;
-        extractAudioBtnEl.style.opacity = '1';
-        extractAudioBtnEl.style.cursor = 'pointer';
-      }
-      if (statsEl) statsEl.innerHTML +=
-        `<br><span style="color:#ffa726">${t('recordDataReady')}</span>`;
-      return;
+        // IDB write confirmed — enable export buttons
+        const saveVideoBtnEl = document.getElementById('record-save-video-btn');
+        const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+        const statsEl = document.getElementById('record-stats');
+        if (m.filename) state.recordFilename = m.filename;
+        if (saveVideoBtnEl) {
+            saveVideoBtnEl.disabled = false;
+            saveVideoBtnEl.style.opacity = '1';
+            saveVideoBtnEl.style.cursor = 'pointer';
+        }
+        if (extractAudioBtnEl) {
+            extractAudioBtnEl.disabled = false;
+            extractAudioBtnEl.style.opacity = '1';
+            extractAudioBtnEl.style.cursor = 'pointer';
+        }
+        if (statsEl) statsEl.innerHTML +=
+            `<br><span style="color:#ffa726">${t('recordDataReady')}</span>`;
+        return;
     }
     if (m.type === 'RECORD_ERROR') {
-      stopRecordingTimer();
-      _prevBitrateReduced = false;
-      const statsEl   = document.getElementById('record-stats');
-      const startBtn  = document.getElementById('record-start-btn');
-      const stopBtnEl = document.getElementById('record-stop-btn');
-      const qualityEl = document.getElementById('record-quality');
-      const dotEl     = document.getElementById('record-indicator');
-      const saveVideoBtnEl    = document.getElementById('record-save-video-btn');
-      const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
-      const audioOnlyEl       = document.getElementById('record-audio-only');
-      if (statsEl) { statsEl.style.display = 'block'; statsEl.innerHTML = `<span style="color:#ff5252">${t('error')}: ${m.error}</span>`; }
-      if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
-      // Restore stop btn, hide export buttons
-      if (stopBtnEl) { stopBtnEl.style.display = ''; stopBtnEl.disabled = true; stopBtnEl.style.cursor = 'not-allowed'; }
-      if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
-      if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
-      if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
-      if (audioOnlyEl) audioOnlyEl.disabled = false;
-      if (dotEl)    { dotEl.style.background = '#f44'; dotEl.style.boxShadow = 'none'; }
-      return;
+        _isRecordingActive = false;
+        stopRecordingTimer();
+        _prevBitrateReduced = false;
+        const statsEl = document.getElementById('record-stats');
+        const startBtn = document.getElementById('record-start-btn');
+        const stopBtnEl = document.getElementById('record-stop-btn');
+        const qualityEl = document.getElementById('record-quality');
+        const dotEl = document.getElementById('record-indicator');
+        const saveVideoBtnEl = document.getElementById('record-save-video-btn');
+        const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
+        const audioOnlyEl = document.getElementById('record-audio-only');
+        if (statsEl) { statsEl.style.display = 'block'; statsEl.innerHTML = `<span style="color:#ff5252">${t('error')}: ${m.error}</span>`; }
+        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+        // Restore stop btn, hide export buttons
+        if (stopBtnEl) { stopBtnEl.style.display = ''; stopBtnEl.disabled = true; stopBtnEl.style.cursor = 'not-allowed'; }
+        if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
+        if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+        if (audioOnlyEl) audioOnlyEl.disabled = false;
+        if (dotEl) { dotEl.style.background = '#f44'; dotEl.style.boxShadow = 'none'; }
+        renderUrls(); // rebuild URL list so Lock A is lifted
+        return;
     }
 
     if (m.type === 'FFMPEG_PROGRESS') {
@@ -927,14 +1053,14 @@ function handleRuntimeMessages(m, sender, sendResponse) {
             const btn = document.getElementById('record-save-video-btn');
             if (btn) btn.textContent = t('recordSaveVideo') + ' ' + Math.round(m.progress) + '%';
         }
-    } else    if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
+    } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
         const isProxy = m.isProxy;
         const isRemux = m.isRemux;
         const isAudioExtract = m.isAudioExtract;
-        
+
         // Phase 10: Signal to Service Worker that popup is active and handling the export
         if (m.type === 'FFMPEG_COMPLETE') {
-           if (typeof sendResponse === 'function') sendResponse({ handled: true });
+            if (typeof sendResponse === 'function') sendResponse({ handled: true });
         }
         if (m.type === 'FFMPEG_COMPLETE' && m.useIDBOutput) {
             if (_isProcessingFinalWrite) {
@@ -942,14 +1068,15 @@ function handleRuntimeMessages(m, sender, sendResponse) {
                 return;
             }
             _isProcessingFinalWrite = true;
+            document.getElementById('export-write-warning')?.style.setProperty('display', 'block');
 
-            // Phase 9: Handle the final write from the Popup context
             (async () => {
                 logger.info('[Popup] FFMPEG_COMPLETE received (useIDBOutput=true). Starting final write sequence...');
-                const { pendingExportTask } = await chrome.storage.local.get('pendingExportTask');
-                const taskFilename = pendingExportTask?.filename;
+                let taskFilename = null;
                 let buffer = null;
                 try {
+                    const { pendingExportTask } = await chrome.storage.local.get('pendingExportTask');
+                    taskFilename = pendingExportTask?.filename;
                     buffer = await loadRemuxOutput();
                     if (!buffer) {
                         logger.error('[Popup] FATAL: loadRemuxOutput returned null. IDB Key might be missing.');
@@ -962,7 +1089,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
                         logger.warn('[Popup] _pendingRecordWritable is lost (popup likely closed during transcode). Attempting handle recovery...');
                         const handle = await loadFileHandle();
                         if (!handle) throw new Error('未找到文件保存句柄 (请在导出期间保持弹窗开启)');
-                        
+
                         // Permission check: if video remuxing takes too long, browser might revoke write permission
                         if (handle.queryPermission) {
                             const perm = await handle.queryPermission({ mode: 'readwrite' });
@@ -977,72 +1104,73 @@ function handleRuntimeMessages(m, sender, sendResponse) {
                         writable = await handle.createWritable();
                     }
 
-                logger.info('[Popup] Initiating binary write...');
-                await writable.write(buffer);
-                logger.info('[Popup] Data written. Finalizing file...');
-                await writable.close();
-                _pendingRecordWritable = null;
+                    logger.info('[Popup] Initiating binary write...');
+                    await writable.write(buffer);
+                    logger.info('[Popup] Data written. Finalizing file...');
+                    await writable.close();
+                    _pendingRecordWritable = null;
 
-                logger.info('[Popup] File system operation SUCCESS.');
-                ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
-            } catch (err) {
-                logger.warn('[Popup] 磁盘直接写入失败，启动 Blob 下载保底方案...', err);
-                if (!buffer) {
-                    logger.error('[Popup] 无法执行 Blob 下载：缓存数据 (buffer) 为空');
-                    ui.showToast(t('error') + ': 数据提取失败', 'error');
-                    return;
+                    logger.info('[Popup] File system operation SUCCESS.');
+                    // Notify background: write is confirmed complete.
+                    // This stops the export watchdog and releases the isMerging lock.
+                    chrome.runtime.sendMessage({ type: 'EXPORT_SUCCESS' }).catch(() => { });
+                    ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
+                } catch (err) {
+                    logger.warn('[Popup] 磁盘直接写入失败，启动 Blob 下载保底方案...', err);
+                    if (!buffer) {
+                        logger.error('[Popup] 无法执行 Blob 下载：缓存数据 (buffer) 为空');
+                        ui.showToast(t('error') + ': 数据提取失败', 'error');
+                        return;
+                    }
+                    const blob = new Blob([buffer], { type: isAudioExtract ? 'audio/mpeg' : 'video/mp4' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = taskFilename || m.filename || (isAudioExtract ? 'vibe_recording.mp3' : 'vibe_recording.mp4');
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
+                } finally {
+                    _isProcessingFinalWrite = false;
+                    document.getElementById('export-write-warning')?.style.setProperty('display', 'none');
+                    _restoreExportButtons();
+                    chrome.storage.local.remove('pendingExportTask').catch(() => { });
+                    state.mergingUrl = null;
+                    state.mergingProgress = 0;
+                    ui.hideMergeBanner();
+                    _applyGlobalLock(); // release Lock B now that all export flags are cleared
+                    chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => { });
                 }
-                const blob = new Blob([buffer], { type: isAudioExtract ? 'audio/mpeg' : 'video/mp4' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = taskFilename || m.filename || (isAudioExtract ? 'vibe_recording.mp3' : 'vibe_recording.mp4');
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
-            } finally {
-                _isProcessingFinalWrite = false;
-                _restoreExportButtons();
-                // Phase 9: Final physical UI teardown after async write completes
-                chrome.storage.local.remove('pendingExportTask').catch(() => {});
-                state.mergingUrl = null;
-                state.mergingProgress = 0;
-                ui.hideMergeBanner();
-                chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => {});
-            }
-        })();
-        return;
-    }
+            })();
+            return;
+        }
 
         if (m.type === 'FFMPEG_COMPLETE') {
             if (isAudioExtract) ui.showToast(t('recordAudioComplete'));
-            else if (isRemux)   ui.showToast(t('recordRemuxComplete'));
-            else                ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
+            else if (isRemux) ui.showToast(t('recordRemuxComplete'));
+            else ui.showToast(t(isProxy ? 'toastDownloadComplete' : 'toastMergeComplete'));
         } else {
             if (_pendingRecordWritable) {
-                _pendingRecordWritable.close().catch(() => {});
+                _pendingRecordWritable.close().catch(() => { });
                 _pendingRecordWritable = null;
             }
             if (isAudioExtract) ui.showToast(t('recordAudioFailed', [m.error]), 'error');
-            else if (isRemux)   ui.showToast(t('recordRemuxFailed', [m.error]), 'error');
-            else                ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
+            else if (isRemux) ui.showToast(t('recordRemuxFailed', [m.error]), 'error');
+            else ui.showToast(t(isProxy ? 'error' : 'mergeError', [m.error]), 'error');
         }
         // Restore export buttons to clickable state after operation completes
         if (isRemux || isAudioExtract) {
             _restoreExportButtons();
-            // Force reset background progress state so it doesn't stay at 95%
-            chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => {});
-            
-            // Phase 8.1: Support multiple continuous exports by keeping the record panel visible.
-            // Reset only the temporary merge/export state variables.
+            chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => { });
             state.mergingUrl = null;
             state.mergingProgress = 0;
             state.mergingStage = '';
             ui.hideMergeBanner();
+            _applyGlobalLock(); // release Lock B now that all export flags are cleared
         } else {
-            resetUI();
+            resetUI(); // also calls _applyGlobalLock internally
             setTimeout(renderUrls, 2500);
         }
     }
@@ -1055,7 +1183,7 @@ chrome.runtime.onMessage.addListener((m, s, r) => {
 });
 
 function _restoreExportButtons() {
-    const saveVideoBtnEl    = document.getElementById('record-save-video-btn');
+    const saveVideoBtnEl = document.getElementById('record-save-video-btn');
     const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
     if (saveVideoBtnEl && saveVideoBtnEl.style.display !== 'none') {
         saveVideoBtnEl.disabled = false;

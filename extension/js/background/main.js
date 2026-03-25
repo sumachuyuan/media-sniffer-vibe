@@ -26,6 +26,64 @@ import {
 adoptExistingOffscreen();
 
 // ---------------------------------------------------------------------------
+// Export watchdog state — protects against popup closure during disk write
+// ---------------------------------------------------------------------------
+// When Track A (popup-side write) begins, we start a 2-second polling watchdog.
+// If the popup disappears before EXPORT_SUCCESS arrives, the watchdog fires
+// Track B (SW-side background download) to guarantee file delivery.
+let _exportWatcherId      = null;  // setInterval handle
+let _exportPendingReq     = null;  // saved FFMPEG_COMPLETE request for fallback
+let _exportPickerOpenedAt = null;  // timestamp when popup opened the Save File Picker
+
+function _stopExportWatchdog() {
+  if (_exportWatcherId !== null) {
+    clearInterval(_exportWatcherId);
+    _exportWatcherId      = null;
+    _exportPendingReq     = null;
+    _exportPickerOpenedAt = null;
+    logger.info('[Watchdog] Export watchdog stopped.');
+  }
+}
+
+// Shared Track B logic: ask offscreen for a Blob URL, SW calls chrome.downloads.download.
+// Extracted so both the initial popup-closed path and the watchdog fallback use one code path.
+function _triggerBackgroundDownload(req) {
+  logger.info(`[Signal] SW background download starting for: ${req.filename}`);
+  chrome.runtime.sendMessage(
+    { type: 'PREPARE_BLOB_URL', isAudioExtract: !!req.isAudioExtract },
+    (response) => {
+      if (chrome.runtime.lastError || !response?.blobUrl) {
+        logger.error(`[Signal] PREPARE_BLOB_URL failed: ${chrome.runtime.lastError?.message || 'no response'}`);
+        state.globalMergeStatus.isMerging = false;
+        closeOffscreen('ffmpeg');
+        return;
+      }
+      const { blobUrl } = response;
+      logger.info(`[Signal] Blob URL received. SW calling chrome.downloads.download for: ${req.filename}`);
+      chrome.downloads.download(
+        { url: blobUrl, filename: req.filename, saveAs: false },
+        (downloadId) => {
+          state.globalMergeStatus.isMerging = false;
+          if (chrome.runtime.lastError || downloadId === undefined) {
+            logger.error(`[Signal] chrome.downloads.download failed: ${chrome.runtime.lastError?.message}`);
+            chrome.runtime.sendMessage({ type: 'REVOKE_BLOB_URL', blobUrl }).catch(() => { });
+            closeOffscreen('ffmpeg');
+            return;
+          }
+          // Track B succeeded — clear the export marker so popup buttons unlock on next open.
+          chrome.storage.local.remove('pendingExportTask').catch(() => {});
+          logger.info(`[Signal] Download registered (id=${downloadId}). Holding offscreen 5s...`);
+          setTimeout(() => {
+            chrome.runtime.sendMessage({ type: 'REVOKE_BLOB_URL', blobUrl }).catch(() => { });
+            closeOffscreen('ffmpeg');
+          }, 5000);
+        }
+      );
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Recording state helper — single write path for chrome.storage.local
 // ---------------------------------------------------------------------------
 /**
@@ -285,6 +343,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       else sendResponse({ segments: [], encryption: null, mapUrl: null });
     }
 
+    // ── Single-instance guard ──────────────────────────────────────────────────
+    // Reject any new FFmpeg/download task if one is already in progress.
+    // Prevents concurrent writes, queue-jumping, and IDB data corruption.
+    if (state.globalMergeStatus.isMerging &&
+        (type === 'START_FFMPEG_MERGE' ||
+         type === 'START_DIRECT_DOWNLOAD' ||
+         type === 'START_WEBM_REMUX'    ||
+         type === 'START_AUDIO_EXTRACT')) {
+      logger.warn(`[SW] ${type} rejected — task already in progress (isMerging=true).`);
+      sendResponse({ error: 'BUSY' });
+      return;
+    }
+
     if (type === 'START_WEBM_REMUX') {
       // Phase 5: Post-recording WebM → MP4 container remux via FFmpeg.wasm (no re-encode).
       state.globalMergeStatus = {
@@ -300,6 +371,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'START_FFMPEG_MERGE') {
+      // Gate: reject immediately if recording is active (belt-and-suspenders behind Lock A + orchestrator).
+      if (getIsRecordActive()) {
+        logger.warn('[SW] START_FFMPEG_MERGE rejected — recording is active.');
+        sendResponse({ error: '正在录制中，请先停止录制再发起合并' });
+        return;
+      }
       logger.info(`START_FFMPEG_MERGE initiated for: ${request.outputName}`, { segments: request.segments?.length });
       state.globalMergeStatus = {
         isMerging: true,
@@ -501,7 +578,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.action.setBadgeText({ text: `${Math.round(request.progress)}%` }).catch(() => { });
       chrome.action.setBadgeBackgroundColor({ color: '#ffcc00' }).catch(() => { });
       // Only broadcast to popup if one is currently open — avoids "no channel" error spam
-      if (chrome.extension.getViews({ type: 'popup' }).length > 0) {
+      const _progressContexts = await chrome.runtime.getContexts({ contextTypes: ['POPUP'] });
+      if (_progressContexts.length > 0) {
         chrome.runtime.sendMessage(request).catch(() => { });
       }
       sendResponse({ status: 'progress_updated' });
@@ -517,75 +595,56 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (type === 'FFMPEG_COMPLETE') {
         if (request.useIDBOutput) {
           // ─── Adaptive Dual-Track Export ───────────────────────────────────────────
-          // Synchronous detection: getViews() is instant; no async callback race window.
-          const hasActivePopup = chrome.extension.getViews({ type: 'popup' }).length > 0;
+          // MV3: getViews() is unavailable in Service Workers; use getContexts() instead.
+          const _completeContexts = await chrome.runtime.getContexts({ contextTypes: ['POPUP'] });
+          const hasActivePopup = _completeContexts.length > 0;
 
           if (hasActivePopup) {
             // ── Track A: Popup is open ─────────────────────────────────────────────
-            // Popup already holds a FileSystemFileHandle; let it write directly to disk.
-            state.globalMergeStatus.isMerging = false;
-            logger.info('[Signal] Popup ACTIVE — forwarding FFMPEG_COMPLETE for popup-side export.');
+            // Forward FFMPEG_COMPLETE so popup can write via FileSystemFileHandle.
+            // isMerging stays TRUE until EXPORT_SUCCESS confirms the write completed.
+            // Offscreen stays alive as a fallback in case popup closes mid-write.
+            logger.info('[Signal] Popup ACTIVE — forwarding FFMPEG_COMPLETE and arming write watchdog.');
             chrome.runtime.sendMessage(request).catch(() => { });
-            closeOffscreen('ffmpeg');
+
+            // Save request for potential Track B fallback
+            _exportPendingReq = { filename: request.filename, isAudioExtract: !!request.isAudioExtract };
+
+            // Watchdog: poll every 2s. If popup disappears before EXPORT_SUCCESS,
+            // switch to Track B. If the file picker was opened very recently (<5s),
+            // apply a grace delay to avoid racing with an in-progress disk write.
+            _exportWatcherId = setInterval(async () => {
+              const _watchdogContexts = await chrome.runtime.getContexts({ contextTypes: ['POPUP'] });
+              if (_watchdogContexts.length === 0) {
+                logger.warn('[Watchdog] Popup closed during write! Switching to SW background download.');
+                const pendingReq     = _exportPendingReq;
+                const pickerOpenedAt = _exportPickerOpenedAt;
+                _stopExportWatchdog(); // clears all state
+                if (!pendingReq) return;
+                const elapsed = pickerOpenedAt ? (Date.now() - pickerOpenedAt) : Infinity;
+                if (elapsed < 5000) {
+                  const delay = 5000 - elapsed;
+                  logger.info(`[Watchdog] Picker opened ${elapsed}ms ago — waiting ${delay}ms grace before fallback.`);
+                  setTimeout(() => _triggerBackgroundDownload(pendingReq), delay);
+                } else {
+                  _triggerBackgroundDownload(pendingReq);
+                }
+              }
+            }, 2000);
 
           } else {
             // ── Track B: Popup is closed ───────────────────────────────────────────
-            // Background (SW) owns the download. isMerging stays true until the
-            // download is registered, preventing any popup that opens mid-operation
-            // from showing a stale "ready" state.
-            logger.info('[Signal] Popup INACTIVE — requesting Blob URL from offscreen for SW-side download...');
-
-            // Ask offscreen to materialise the IDB output as a Blob URL and return it.
-            // Blob URLs are chrome-extension:// origin-scoped; the SW and the offscreen
-            // document share the same origin, so chrome.downloads.download in the SW
-            // can consume the URL while the offscreen document remains alive.
-            chrome.runtime.sendMessage(
-              { type: 'PREPARE_BLOB_URL', isAudioExtract: !!request.isAudioExtract },
-              (response) => {
-                if (chrome.runtime.lastError || !response?.blobUrl) {
-                  logger.error(`[Signal] PREPARE_BLOB_URL failed: ${chrome.runtime.lastError?.message || 'no response'}`);
-                  state.globalMergeStatus.isMerging = false;
-                  closeOffscreen('ffmpeg');
-                  return;
-                }
-
-                const { blobUrl } = response;
-                logger.info(`[Signal] Blob URL received. SW calling chrome.downloads.download for: ${request.filename}`);
-
-                chrome.downloads.download(
-                  { url: blobUrl, filename: request.filename, saveAs: false },
-                  (downloadId) => {
-                    // Release the isMerging lock regardless of outcome
-                    state.globalMergeStatus.isMerging = false;
-
-                    if (chrome.runtime.lastError || downloadId === undefined) {
-                      logger.error(`[Signal] chrome.downloads.download failed: ${chrome.runtime.lastError?.message}`);
-                      chrome.runtime.sendMessage({ type: 'REVOKE_BLOB_URL', blobUrl }).catch(() => { });
-                      closeOffscreen('ffmpeg');
-                      return;
-                    }
-
-                    logger.info(`[Signal] Download registered (id=${downloadId}). Holding offscreen for 5s to let download manager lock the Blob...`);
-
-                    // 5-second hold: ensures the Chrome download manager has taken full
-                    // ownership of the Blob data before the offscreen document is destroyed
-                    // (destruction revokes all Blob URLs in that document's context).
-                    setTimeout(() => {
-                      logger.info('[Signal] 5s elapsed. Revoking Blob URL and closing offscreen.');
-                      chrome.runtime.sendMessage({ type: 'REVOKE_BLOB_URL', blobUrl }).catch(() => { });
-                      closeOffscreen('ffmpeg');
-                    }, 5000);
-                  }
-                );
-              }
-            );
+            // isMerging stays true until download is registered (see _triggerBackgroundDownload).
+            logger.info('[Signal] Popup INACTIVE — going straight to SW background download.');
+            _triggerBackgroundDownload({ filename: request.filename, isAudioExtract: !!request.isAudioExtract });
           }
 
         } else {
           // ─── Legacy FFmpeg flow (blobUrl already in offscreen Blob store) ─────────
           // blobUrl is invalidated the moment closeDocument() fires — download first.
           state.globalMergeStatus.isMerging = false;
-          const hasActivePopup = chrome.extension.getViews({ type: 'popup' }).length > 0;
+          const _legacyContexts = await chrome.runtime.getContexts({ contextTypes: ['POPUP'] });
+          const hasActivePopup = _legacyContexts.length > 0;
           logger.info(`[Signal] Legacy download: file=${request.filename}, saveAs=${hasActivePopup} (popup ${hasActivePopup ? 'open' : 'closed'})`);
           chrome.runtime.sendMessage(request).catch(() => { });
           chrome.downloads.download(
@@ -599,6 +658,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         closeOffscreen('ffmpeg');
         chrome.runtime.sendMessage(request).catch(() => { });
       }
+    }
+
+    if (type === 'EXPORT_SUCCESS') {
+      // Popup successfully completed writable.close() — stop watchdog and release lock.
+      logger.info('[Signal] EXPORT_SUCCESS received. Disk write confirmed. Stopping watchdog and closing offscreen.');
+      _stopExportWatchdog();
+      chrome.storage.local.remove('pendingExportTask').catch(() => {}); // belt-and-suspenders cleanup
+      state.globalMergeStatus.isMerging = false;
+      closeOffscreen('ffmpeg');
+      sendResponse({ ok: true });
+    }
+
+    if (type === 'EXPORT_PICKER_OPENED') {
+      // Popup opened the Save File Picker — record the timestamp for watchdog grace period.
+      _exportPickerOpenedAt = Date.now();
+      logger.info('[Watchdog] EXPORT_PICKER_OPENED received. 5s grace period armed.');
+      sendResponse({ ok: true });
     }
 
     if (type === 'OFFSCREEN_CLEANUP_REQ') {

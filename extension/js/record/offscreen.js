@@ -182,6 +182,14 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
   };
 
   // 3. Extract tracks from the already-captured stream
+  if (!mediaStream) {
+    const err = '媒体流已失效，无法继续录制';
+    logger.error(`${COMPONENT} ${err}`);
+    chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
+    isRunning = false;
+    worker?.terminate(); worker = null;
+    return;
+  }
   const videoTrack = mediaStream.getVideoTracks()[0];
   const audioTrack = mediaStream.getAudioTracks()[0];
 
@@ -194,19 +202,19 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     return;
   }
 
-  // Chrome tab capture MUTES the original tab — to allow the user to hear the 
-  // audio while recording, we must route the stream back to the speakers.
+  // Chrome tab capture MUTES the original tab.  Route the captured stream back
+  // to the speakers via an Audio element so the user hears audio while recording.
+  // Requires the 'AUDIO_PLAYBACK' reason on the offscreen document (set in orchestrator.js).
   if (audioTrack) {
-    logger.info(`${COMPONENT} Audio track captured [${audioTrack.label}] — bridging to speakers`);
+    logger.info(`${COMPONENT} Audio track captured — routing back to speakers`);
     try {
-      const audioCtx = new AudioContext();
-      const source = audioCtx.createMediaStreamSource(mediaStream);
-      source.connect(audioCtx.destination);
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume().catch(() => { });
-      }
+      const audioPlayback = new Audio();
+      audioPlayback.srcObject = mediaStream;
+      audioPlayback.play().catch(err => {
+        logger.warn(`${COMPONENT} Speaker routing failed: ${err.message}`);
+      });
     } catch (err) {
-      logger.warn(`${COMPONENT} Audio bridging failed: ${err.message}`);
+      logger.warn(`${COMPONENT} Speaker routing setup failed: ${err.message}`);
     }
   }
 

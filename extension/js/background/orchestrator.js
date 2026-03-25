@@ -123,11 +123,17 @@ function buildMergeCommand(data) {
 
 async function dispatchToOffscreen(command) {
   logger.info('[Orchestrator] Dispatching command to Offscreen:', command.type);
-  // Preemption: If the record offscreen is active, it must be closed before
-  // an FFmpeg command can be sent to a new 'ffmpeg' offscreen document.
+
   if (isRecordOffscreenActive) {
-    logger.warn('[Orchestrator] Record offscreen is active during FFmpeg dispatch. Preempting and closing for download.');
-    await closeOffscreen();
+    // Full isolation: ANY FFmpeg command is rejected while recording is active.
+    // No preemption — recording is never killed to make room for another task.
+    logger.warn(`[Orchestrator] ${command.type} blocked: recording is active. Not preempting.`);
+    chrome.runtime.sendMessage({
+      type: 'FFMPEG_ERROR',
+      error: '正在录制中，请先停止录制再发起合并',
+      url: command.manifestUrl || command.url || '',
+    }).catch(() => {});
+    return;
   }
 
   if (_isFfmpegBusy) {
@@ -260,8 +266,8 @@ export async function createRecordOffscreen() {
     _activeOffscreenType = 'record';
     await chrome.offscreen.createDocument({
       url: 'record.html',
-      reasons: ['WORKERS'],
-      justification: 'Screen recording requires a persistent DOM environment for MediaStreamTrackProcessor and Web Worker coordination.',
+      reasons: ['WORKERS', 'AUDIO_PLAYBACK'],
+      justification: 'Screen recording requires a persistent DOM environment for MediaStreamTrackProcessor and Web Worker coordination. AUDIO_PLAYBACK is required to route the captured tab audio back to the user\'s speakers.',
     });
     return true;
   } finally {
@@ -315,8 +321,20 @@ export async function dispatchToRecordOffscreen(command) {
           logger.info('[Orchestrator] REQUEST_RECORD_READY not yet answered — waiting for natural READY signal.');
         });
     } else if (hasDoc) {
-      // Conflict: FFmpeg is active or type is NULL (after SW restart)
-      logger.warn(`dispatchToRecordOffscreen: Type conflict (Current: ${_activeOffscreenType}). Force-closing and recreating.`);
+      // Conflict: another offscreen type is active.
+      if (_isFfmpegBusy) {
+        // An FFmpeg task is actively running — do NOT preempt it to start recording.
+        // The single-instance guard in background/main.js and Lock B in popup should
+        // have prevented reaching this point, but this is the last safety net.
+        logger.warn('[Orchestrator] Recording start blocked: FFmpeg is actively processing. Not preempting.');
+        chrome.runtime.sendMessage({
+          type: 'RECORD_ERROR',
+          error: '转码任务进行中，请等待完成后再开始录制',
+        }).catch(() => {});
+        return;
+      }
+      // Type is NULL (SW restart) or stale record offscreen — safe to close and recreate.
+      logger.warn(`dispatchToRecordOffscreen: Stale offscreen (type: ${_activeOffscreenType}). Force-closing and recreating.`);
       await closeOffscreen();
       pendingRecordCommand = command;
       await createRecordOffscreen();
