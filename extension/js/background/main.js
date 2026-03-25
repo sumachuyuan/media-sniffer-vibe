@@ -508,40 +508,83 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'FFMPEG_COMPLETE' || type === 'FFMPEG_ERROR') {
-      state.globalMergeStatus.isMerging = false;
+      // Note: isMerging is set to false conditionally below — the popup-closed background
+      // download path keeps it true until chrome.downloads.download confirms registration.
       handleFfmpegDone();
       chrome.action.setBadgeText({ text: '' }).catch(() => { });
       clearDnrRules().catch(logger.error);
 
       if (type === 'FFMPEG_COMPLETE') {
         if (request.useIDBOutput) {
-          // Phase 10: Adaptive Dual-Track Export.
-          // IMPORTANT: Do NOT call closeOffscreen() here — the offscreen document must remain
-          // alive until the fallback path (OFFSCREEN_TRIGGER_DOWNLOAD) is confirmed or rejected.
-          // closeOffscreen('ffmpeg') is called only after popup/fallback has been determined.
-          chrome.runtime.sendMessage(request, (response) => {
-            if (chrome.runtime.lastError || !response || !response.handled) {
-              // No response from popup (likely closed). Trigger Silent Background Fallback.
-              // The offscreen is still alive here and can handle OFFSCREEN_TRIGGER_DOWNLOAD.
-              logger.info('[Signal] Popup is INACTIVE. Instructing Offscreen to trigger background download.');
-              chrome.runtime.sendMessage({
-                type: 'OFFSCREEN_TRIGGER_DOWNLOAD',
-                filename: request.filename,
-                isAudioExtract: !!request.isAudioExtract
-              }).catch(err => {
-                logger.error('[Signal] Failed to trigger background download on Offscreen', err);
-                closeOffscreen('ffmpeg');
-              });
-            } else {
-              // Popup handled it. Now safe to close offscreen.
-              logger.info('[Signal] Popup is ACTIVE and handled the export. Tearing down offscreen.');
-              closeOffscreen('ffmpeg');
-            }
-          });
+          // ─── Adaptive Dual-Track Export ───────────────────────────────────────────
+          // Synchronous detection: getViews() is instant; no async callback race window.
+          const hasActivePopup = chrome.extension.getViews({ type: 'popup' }).length > 0;
+
+          if (hasActivePopup) {
+            // ── Track A: Popup is open ─────────────────────────────────────────────
+            // Popup already holds a FileSystemFileHandle; let it write directly to disk.
+            state.globalMergeStatus.isMerging = false;
+            logger.info('[Signal] Popup ACTIVE — forwarding FFMPEG_COMPLETE for popup-side export.');
+            chrome.runtime.sendMessage(request).catch(() => { });
+            closeOffscreen('ffmpeg');
+
+          } else {
+            // ── Track B: Popup is closed ───────────────────────────────────────────
+            // Background (SW) owns the download. isMerging stays true until the
+            // download is registered, preventing any popup that opens mid-operation
+            // from showing a stale "ready" state.
+            logger.info('[Signal] Popup INACTIVE — requesting Blob URL from offscreen for SW-side download...');
+
+            // Ask offscreen to materialise the IDB output as a Blob URL and return it.
+            // Blob URLs are chrome-extension:// origin-scoped; the SW and the offscreen
+            // document share the same origin, so chrome.downloads.download in the SW
+            // can consume the URL while the offscreen document remains alive.
+            chrome.runtime.sendMessage(
+              { type: 'PREPARE_BLOB_URL', isAudioExtract: !!request.isAudioExtract },
+              (response) => {
+                if (chrome.runtime.lastError || !response?.blobUrl) {
+                  logger.error(`[Signal] PREPARE_BLOB_URL failed: ${chrome.runtime.lastError?.message || 'no response'}`);
+                  state.globalMergeStatus.isMerging = false;
+                  closeOffscreen('ffmpeg');
+                  return;
+                }
+
+                const { blobUrl } = response;
+                logger.info(`[Signal] Blob URL received. SW calling chrome.downloads.download for: ${request.filename}`);
+
+                chrome.downloads.download(
+                  { url: blobUrl, filename: request.filename, saveAs: false },
+                  (downloadId) => {
+                    // Release the isMerging lock regardless of outcome
+                    state.globalMergeStatus.isMerging = false;
+
+                    if (chrome.runtime.lastError || downloadId === undefined) {
+                      logger.error(`[Signal] chrome.downloads.download failed: ${chrome.runtime.lastError?.message}`);
+                      chrome.runtime.sendMessage({ type: 'REVOKE_BLOB_URL', blobUrl }).catch(() => { });
+                      closeOffscreen('ffmpeg');
+                      return;
+                    }
+
+                    logger.info(`[Signal] Download registered (id=${downloadId}). Holding offscreen for 5s to let download manager lock the Blob...`);
+
+                    // 5-second hold: ensures the Chrome download manager has taken full
+                    // ownership of the Blob data before the offscreen document is destroyed
+                    // (destruction revokes all Blob URLs in that document's context).
+                    setTimeout(() => {
+                      logger.info('[Signal] 5s elapsed. Revoking Blob URL and closing offscreen.');
+                      chrome.runtime.sendMessage({ type: 'REVOKE_BLOB_URL', blobUrl }).catch(() => { });
+                      closeOffscreen('ffmpeg');
+                    }, 5000);
+                  }
+                );
+              }
+            );
+          }
+
         } else {
-          // Legacy/Standard FFmpeg flow (blobUrl lives inside the offscreen document's Blob store).
-          // IMPORTANT: blobUrl is invalidated the moment closeDocument() is called.
-          // We must register the download FIRST, then close the offscreen in the callback.
+          // ─── Legacy FFmpeg flow (blobUrl already in offscreen Blob store) ─────────
+          // blobUrl is invalidated the moment closeDocument() fires — download first.
+          state.globalMergeStatus.isMerging = false;
           const hasActivePopup = chrome.extension.getViews({ type: 'popup' }).length > 0;
           logger.info(`[Signal] Legacy download: file=${request.filename}, saveAs=${hasActivePopup} (popup ${hasActivePopup ? 'open' : 'closed'})`);
           chrome.runtime.sendMessage(request).catch(() => { });
@@ -551,7 +594,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           );
         }
       } else {
-        // FFMPEG_ERROR
+        // ─── FFMPEG_ERROR ─────────────────────────────────────────────────────────
+        state.globalMergeStatus.isMerging = false;
         closeOffscreen('ffmpeg');
         chrome.runtime.sendMessage(request).catch(() => { });
       }

@@ -481,7 +481,7 @@ async function handleAudioExtract(m) {
   }
 }
 
-chrome.runtime.onMessage.addListener((m) => {
+chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
   if (m.type === 'FFMPEG_MERGE') handleMerge(m);
   if (m.type === 'FFMPEG_MERGE_SEGMENTS') handleMergeSegments(m);
   if (m.type === 'START_PROXY_DOWNLOAD') handleProxyDownload(m);
@@ -489,45 +489,67 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'START_AUDIO_EXTRACT') handleAudioExtract(m);
   if (m.type === 'CANCEL_FFMPEG_MERGE') isCancelled = true;
 
+  // ── Track B: SW-side background download ──────────────────────────────────
+  // Background detects popup is closed synchronously, then asks offscreen to
+  // materialise the IDB output as a Blob URL. SW passes that URL to
+  // chrome.downloads.download (same chrome-extension:// origin — accessible).
+  if (m.type === 'PREPARE_BLOB_URL') {
+    (async () => {
+      try {
+        logger.info(`[Offscreen] PREPARE_BLOB_URL requested (type: ${m.isAudioExtract ? 'audio' : 'video'})`);
+        const buffer = await loadRemuxOutput();
+        if (!buffer) throw new Error('IDB remuxOutputBuffer not found');
+
+        const fileSizeMB = (buffer.byteLength / 1024 / 1024).toFixed(1);
+        logger.info(`[Offscreen] IDB output loaded: ${fileSizeMB} MB. Creating Blob URL...`);
+
+        const mimeType = m.isAudioExtract ? 'audio/mpeg' : 'video/mp4';
+        const blob = new Blob([buffer], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+        logger.info(`[Offscreen] Blob URL created. Responding to SW.`);
+        sendResponse({ blobUrl });
+      } catch (e) {
+        logger.error('[Offscreen] PREPARE_BLOB_URL failed:', e);
+        sendResponse({ error: e.message });
+      }
+    })();
+    return true; // Keep the message channel open for the async sendResponse above
+  }
+
+  // Background sends this after 5s to allow Blob cleanup once download is locked.
+  if (m.type === 'REVOKE_BLOB_URL') {
+    if (m.blobUrl) {
+      URL.revokeObjectURL(m.blobUrl);
+      logger.info('[Offscreen] Blob URL revoked on SW request.');
+    }
+  }
+
+  // Legacy fallback (kept for safety; not reached in the new PREPARE_BLOB_URL flow).
   if (m.type === 'OFFSCREEN_TRIGGER_DOWNLOAD') {
     (async () => {
       try {
-        const sizeMB = '?';
-        logger.info(`[Offscreen] Background download triggered — file: ${m.filename}, type: ${m.isAudioExtract ? 'audio' : 'video'}`);
+        logger.info(`[Offscreen] OFFSCREEN_TRIGGER_DOWNLOAD (legacy) — file: ${m.filename}`);
         const buffer = await loadRemuxOutput();
         if (!buffer) throw new Error('IDB 数据加载失败');
-
-        const fileSizeMB = (buffer.byteLength / 1024 / 1024).toFixed(1);
-        logger.info(`[Offscreen] IDB output loaded: ${fileSizeMB} MB. Creating Blob and initiating silent download...`);
 
         const blob = new Blob([buffer], { type: m.isAudioExtract ? 'audio/mpeg' : 'video/mp4' });
         const url = URL.createObjectURL(blob);
 
-        // saveAs: false — this is a background fallback path (no active popup/user gesture).
-        // saveAs: true would require an active browser window and blocks on dialog; false
-        // saves directly to the default Downloads folder without user interaction.
-        chrome.downloads.download({
-          url: url,
-          filename: m.filename,
-          saveAs: false,
-        }, (downloadId) => {
+        chrome.downloads.download({ url, filename: m.filename, saveAs: false }, (downloadId) => {
           if (chrome.runtime.lastError || downloadId === undefined) {
-            logger.error(`[Offscreen] chrome.downloads.download failed: ${chrome.runtime.lastError?.message}`);
+            logger.error(`[Offscreen] Legacy download failed: ${chrome.runtime.lastError?.message}`);
             URL.revokeObjectURL(url);
-            chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载启动失败: ${chrome.runtime.lastError?.message}` }).catch(() => {});
+            chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载失败: ${chrome.runtime.lastError?.message}` }).catch(() => { });
             return;
           }
-          logger.info(`[Offscreen] Download registered (id=${downloadId}). Scheduling cleanup...`);
-          // Brief delay ensures the download manager has taken ownership of the Blob URL
-          // before we revoke it; 1500 ms is sufficient even on slow disks.
+          logger.info(`[Offscreen] Legacy download registered (id=${downloadId}). Cleanup in 5s...`);
           setTimeout(() => {
             URL.revokeObjectURL(url);
-            logger.info('[Offscreen] Blob URL revoked. Requesting SW cleanup.');
             chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLEANUP_REQ' }).catch(() => { });
-          }, 1500);
+          }, 5000);
         });
       } catch (e) {
-        logger.error('[Offscreen] Background download fallback failed', e);
+        logger.error('[Offscreen] OFFSCREEN_TRIGGER_DOWNLOAD failed', e);
         chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载失败: ${e.message}` }).catch(() => { });
       }
     })();
