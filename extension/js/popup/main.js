@@ -75,6 +75,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (e) { }
     }
 
+    // Phase 9.9.2: Proactively warm up the record offscreen to prevent focus-steal on 'Start' click.
+    // Delaying slightly to allow initial popup render to settle.
+    setTimeout(() => {
+        chrome.runtime.sendMessage({ type: 'PRE_WARM_RECORD_OFFSCREEN' }).catch(() => {});
+    }, 200);
+
     // 1. Initial Render & Status Sync
     renderUrls();
     syncMergeStatus();
@@ -199,15 +205,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       startBtn.disabled = true;
       startBtn.style.opacity = '0.4';
 
-      // Pre-warm the offscreen document so any stale cleanup (force-recreate)
-      // happens before we hand off to the background for capture.
-      // NOTE: getMediaStreamId is intentionally NOT called here.
-      // Per Chrome docs, a streamId obtained from the popup can only be consumed
-      // by the popup itself. The background SW must call getMediaStreamId so the
-      // resulting streamId is valid for use in the offscreen document.
-      chrome.runtime.sendMessage({ type: 'PRE_WARM_RECORD_OFFSCREEN' }, () => {
-        _startRecordingFlow(activeTabId);
-      });
+      // Phase 9.9.2: Direct start. Offscreen should already be pre-warmed.
+      _startRecordingFlow(activeTabId);
     };
 
     const _startRecordingFlow = (tabId) => {
