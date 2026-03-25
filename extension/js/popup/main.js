@@ -116,19 +116,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         state.recordFilename = null;
         const statsEl = document.getElementById('record-stats');
         if (statsEl) statsEl.style.display = 'none';
-        const saveVideoBtnEl   = document.getElementById('record-save-video-btn');
+        const saveVideoBtnEl = document.getElementById('record-save-video-btn');
         const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
-        if (saveVideoBtnEl)    saveVideoBtnEl.style.display = 'none';
+
+        if (startBtnEl) { startBtnEl.disabled = false; startBtnEl.style.opacity = '1'; }
+        if (stopBtnEl) { stopBtnEl.style.display = 'none'; stopBtnEl.disabled = true; } // Hide stop btn
+        if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
+        if (audioOnlyEl) audioOnlyEl.disabled = false;
+        if (statsEl) statsEl.style.display = 'none';
+        if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
         if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
 
-        // --- Persistence & deep storage reset ---
-        // 5. Clear chrome.storage persisted recording state
-        chrome.storage.local.set({ recordingState: { isRecording: false, isConsolidating: false, isReady: false } }).catch(() => {});
-
-        // 6. Clear IndexedDB (chunks + handles) via record offscreen
+        // 3. Clear persistence
+        chrome.storage.local.set({ recordingState: { isRecording: false, isReady: false, isConsolidating: false } }).catch(() => {});
+        
+        // 4. Global Data Erasure
         chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' });
-
-        // 7. Clear sniffed URL list and badges
         chrome.runtime.sendMessage({ type: 'CLEAR_URLS' }, () => {
             ui.showToast(t('toastListCleared'));
             renderUrls();
