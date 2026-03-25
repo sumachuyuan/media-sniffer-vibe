@@ -539,11 +539,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           });
         } else {
-          // Legacy/Standard FFmpeg flow: trigger download with blobUrl/dataUrl
-          closeOffscreen('ffmpeg'); // Safe to close immediately — data is in blobUrl, not offscreen
+          // Legacy/Standard FFmpeg flow (blobUrl lives inside the offscreen document's Blob store).
+          // IMPORTANT: blobUrl is invalidated the moment closeDocument() is called.
+          // We must register the download FIRST, then close the offscreen in the callback.
+          const hasActivePopup = chrome.extension.getViews({ type: 'popup' }).length > 0;
+          logger.info(`[Signal] Legacy download: file=${request.filename}, saveAs=${hasActivePopup} (popup ${hasActivePopup ? 'open' : 'closed'})`);
           chrome.runtime.sendMessage(request).catch(() => { });
           chrome.downloads.download(
-            { url: request.blobUrl || request.dataUrl, filename: request.filename, saveAs: true },
+            { url: request.blobUrl || request.dataUrl, filename: request.filename, saveAs: hasActivePopup },
+            () => closeOffscreen('ffmpeg'), // Close AFTER download registry takes ownership of the Blob URL
           );
         }
       } else {
@@ -556,6 +560,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (type === 'OFFSCREEN_CLEANUP_REQ') {
       logger.info('[Orchestrator] Received background cleanup request. Closing offscreen.');
       closeOffscreen('ffmpeg');
+      sendResponse({ ok: true });
+    }
+
+    if (type === 'OFFSCREEN_HEARTBEAT') {
+      // Receiving any message resets the MV3 SW idle timer.
+      // This handler is intentionally a no-op — just being reached is sufficient.
+      logger.debug(`[SW] Heartbeat from offscreen (task: ${request.task || 'unknown'}). SW remains active.`);
       sendResponse({ ok: true });
     }
 

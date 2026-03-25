@@ -18,6 +18,31 @@ let isCancelled = false;
 const t = (key) => (typeof chrome !== 'undefined' && chrome.i18n) ? chrome.i18n.getMessage(key) || key : key;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// ---------------------------------------------------------------------------
+// SW keep-alive heartbeat (module-level, covers fetch + encode phases)
+// ffmpeg.js setProgress covers the runFFmpeg window; this timer covers
+// everything else (IDB reads, segment fetching, consolidation) so the
+// MV3 Service Worker never goes idle for more than 20 seconds.
+// ---------------------------------------------------------------------------
+let _heartbeatTimer = null;
+
+function _startHeartbeat(taskName) {
+  _stopHeartbeat();
+  logger.info(`[Heartbeat] Started for task: ${taskName}`);
+  _heartbeatTimer = setInterval(() => {
+    chrome.runtime.sendMessage({ type: 'OFFSCREEN_HEARTBEAT', task: taskName })
+      .catch(() => {}); // SW may briefly restart; suppress the transient error
+  }, 20000);
+}
+
+function _stopHeartbeat() {
+  if (_heartbeatTimer !== null) {
+    clearInterval(_heartbeatTimer);
+    _heartbeatTimer = null;
+    logger.info('[Heartbeat] Stopped.');
+  }
+}
+
 function sendProgress(progress, url, stage = t('fetching'), itemId = null) {
   chrome.runtime.sendMessage({ type: 'FFMPEG_PROGRESS', progress, url, stage, itemId }).catch(() => { });
 }
@@ -29,6 +54,7 @@ async function handleMerge(m) {
   const { videoUrl, audioUrl, outputName, manifestUrl, itemId } = m;
   const progressUrl = manifestUrl || videoUrl;
   let ffmpeg = null;
+  _startHeartbeat('handleMerge');
 
   try {
     const fetchAsset = async (url) => {
@@ -60,7 +86,7 @@ async function handleMerge(m) {
 
     if (isCancelled) throw new Error('CANCELLED');
     sendProgress(70, progressUrl, t('merging'), itemId);
-    
+
     // Attempt merging with '-c copy'. 
     // Note: MP4 container might fail for VP9+Opus. If it fails, we try MKV as a robust fallback.
     let result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-c', 'copy', 'final.mp4']);
@@ -71,7 +97,7 @@ async function handleMerge(m) {
       result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-c', 'copy', 'final.mkv']);
       finalExt = 'mkv';
     }
-    
+
     if (result !== 0) {
       throw new Error('FFMPEG_EXEC_ERROR: Merge failed for both MP4 and MKV containers.');
     }
@@ -86,6 +112,7 @@ async function handleMerge(m) {
       chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url: progressUrl, itemId }).catch(() => { });
     }
   } finally {
+    _stopHeartbeat();
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
     isMerging = false;
   }
@@ -103,6 +130,7 @@ async function handleMergeSegments(m) {
 
   let aesKey = null;
   let ffmpeg = null;
+  _startHeartbeat('handleMergeSegments');
   try {
     ffmpeg = await initFFmpeg(true);
     cleanupFS(ffmpeg);
@@ -153,7 +181,7 @@ async function handleMergeSegments(m) {
 
           if (++attempt >= MAX_ATTEMPTS) throw new Error(errorMsg || 'Max attempts reached');
 
-          const delay = 500 * Math.pow(2, attempt - 1); 
+          const delay = 500 * Math.pow(2, attempt - 1);
           logger.info(`Worker ${workerId} segment ${index} retrying in ${delay}ms...`);
           await sleep(delay);
         }
@@ -213,14 +241,14 @@ async function handleMergeSegments(m) {
       const parts = [ffmpeg.FS('readFile', 'init.mp4')];
       for (let i = 0; i < total; i++) {
         parts.push(ffmpeg.FS('readFile', `part_${i}.ts`));
-        try { ffmpeg.FS('unlink', `part_${i}.ts`); } catch(e){} // Free memory
+        try { ffmpeg.FS('unlink', `part_${i}.ts`); } catch (e) { } // Free memory
       }
-      try { ffmpeg.FS('unlink', 'init.mp4'); } catch(e){}
+      try { ffmpeg.FS('unlink', 'init.mp4'); } catch (e) { }
 
       const mergedBlob = new Blob(parts);
       const mergedBuffer = new Uint8Array(await mergedBlob.arrayBuffer());
       ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
-      
+
       finalArgs = ['-y', '-i', 'merged.mp4', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
     } else {
       let concatList = "";
@@ -245,6 +273,7 @@ async function handleMergeSegments(m) {
       chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url: progressUrl, itemId }).catch(() => { });
     }
   } finally {
+    _stopHeartbeat();
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
     isMerging = false; aesKey = null;
   }
@@ -300,6 +329,7 @@ async function handleWebMRemux(m) {
   logger.info('[Remux] handleWebMRemux triggered. Starting IDB fetch...');
 
   let ffmpeg = null;
+  _startHeartbeat('handleWebMRemux');
   try {
     sendProgress(5, outputName, '读取录制文件...');
 
@@ -341,7 +371,7 @@ async function handleWebMRemux(m) {
     if (result !== 0) throw new Error('FFmpeg remux 执行失败，请检查 WebM 文件格式');
 
     // ✅ 先 unlink 输入文件释放 WASM 堆内存，再读取输出，避免 input+output 同时占用 WASM 堆
-    try { ffmpeg.FS('unlink', 'input.webm'); } catch (e) {}
+    try { ffmpeg.FS('unlink', 'input.webm'); } catch (e) { }
 
     sendProgress(95, outputName, '正在暂存导出文件...');
     const outData = ffmpeg.FS('readFile', 'output.mp4');
@@ -357,7 +387,7 @@ async function handleWebMRemux(m) {
       url: outputName,
       isRemux: true,
       useIDBOutput: true, // Signal to popup to read from IDB
-    }).catch(() => {});
+    }).catch(() => { });
   } catch (e) {
     const detail = `${e.name || 'Error'}: ${e.message || String(e)}`;
     logger.error(`[Remux] Error — ${detail}`, e);
@@ -366,8 +396,9 @@ async function handleWebMRemux(m) {
       error: `MP4 转封装失败: ${detail}`,
       url: outputName,
       isRemux: true,
-    }).catch(() => {});
+    }).catch(() => { });
   } finally {
+    _stopHeartbeat();
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
     // IDB bytes are NOT cleared here so the user can still run "Extract Audio"
     // on the same recording. _clearRemuxBlob() is called in handleAudioExtract
@@ -387,6 +418,7 @@ async function handleAudioExtract(m) {
   logger.info('[AudioExtract] handleAudioExtract triggered. Starting IDB fetch...');
 
   let ffmpeg = null;
+  _startHeartbeat('handleAudioExtract');
   try {
     sendProgress(5, outputName, '读取录制文件...');
     let buffer = await loadRemuxInput();
@@ -418,7 +450,7 @@ async function handleAudioExtract(m) {
     if (result !== 0) throw new Error('FFmpeg 音频提取失败，请检查录制文件格式');
 
     // ✅ 先 unlink 输入文件释放 WASM 堆，再读取输出
-    try { ffmpeg.FS('unlink', 'input.webm'); } catch (e) {}
+    try { ffmpeg.FS('unlink', 'input.webm'); } catch (e) { }
 
     sendProgress(95, outputName, '正在暂存音频文件...');
     const outData = ffmpeg.FS('readFile', 'output.mp3');
@@ -432,7 +464,7 @@ async function handleAudioExtract(m) {
       url: outputName,
       isAudioExtract: true,
       useIDBOutput: true,
-    }).catch(() => {});
+    }).catch(() => { });
   } catch (e) {
     const detail = `${e.name || 'Error'}: ${e.message || String(e)}`;
     logger.error(`[AudioExtract] Error — ${detail}`, e);
@@ -441,8 +473,9 @@ async function handleAudioExtract(m) {
       error: `MP3 提取失败: ${detail}`,
       url: outputName,
       isAudioExtract: true,
-    }).catch(() => {});
+    }).catch(() => { });
   } finally {
+    _stopHeartbeat();
     if (ffmpeg) cleanupAfterMerge(ffmpeg);
     isMerging = false;
   }
@@ -459,28 +492,43 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'OFFSCREEN_TRIGGER_DOWNLOAD') {
     (async () => {
       try {
-        logger.info(`[Offscreen] Background download trigger requested for: ${m.filename}`);
+        const sizeMB = '?';
+        logger.info(`[Offscreen] Background download triggered — file: ${m.filename}, type: ${m.isAudioExtract ? 'audio' : 'video'}`);
         const buffer = await loadRemuxOutput();
         if (!buffer) throw new Error('IDB 数据加载失败');
-        
+
+        const fileSizeMB = (buffer.byteLength / 1024 / 1024).toFixed(1);
+        logger.info(`[Offscreen] IDB output loaded: ${fileSizeMB} MB. Creating Blob and initiating silent download...`);
+
         const blob = new Blob([buffer], { type: m.isAudioExtract ? 'audio/mpeg' : 'video/mp4' });
         const url = URL.createObjectURL(blob);
-        
+
+        // saveAs: false — this is a background fallback path (no active popup/user gesture).
+        // saveAs: true would require an active browser window and blocks on dialog; false
+        // saves directly to the default Downloads folder without user interaction.
         chrome.downloads.download({
           url: url,
           filename: m.filename,
-          saveAs: true
-        }, () => {
-          logger.info('[Offscreen] Background download initiated. Telling background to cleanup.');
-          // Briefly wait to ensure download registry handover
+          saveAs: false,
+        }, (downloadId) => {
+          if (chrome.runtime.lastError || downloadId === undefined) {
+            logger.error(`[Offscreen] chrome.downloads.download failed: ${chrome.runtime.lastError?.message}`);
+            URL.revokeObjectURL(url);
+            chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载启动失败: ${chrome.runtime.lastError?.message}` }).catch(() => {});
+            return;
+          }
+          logger.info(`[Offscreen] Download registered (id=${downloadId}). Scheduling cleanup...`);
+          // Brief delay ensures the download manager has taken ownership of the Blob URL
+          // before we revoke it; 1500 ms is sufficient even on slow disks.
           setTimeout(() => {
             URL.revokeObjectURL(url);
-            chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLEANUP_REQ' }).catch(() => {});
-          }, 1000);
+            logger.info('[Offscreen] Blob URL revoked. Requesting SW cleanup.');
+            chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLEANUP_REQ' }).catch(() => { });
+          }, 1500);
         });
       } catch (e) {
         logger.error('[Offscreen] Background download fallback failed', e);
-        chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载失败: ${e.message}` }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载失败: ${e.message}` }).catch(() => { });
       }
     })();
   }
