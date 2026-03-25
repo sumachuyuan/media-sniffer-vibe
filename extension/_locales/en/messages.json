@@ -297,5 +297,8 @@
   },
   "confirmClearDuringMerge": {
     "message": "Merging in progress. Clearing the list will terminate the task and delete temporary files. Are you sure?"
+  },
+  "confirmClearGeneral": {
+    "message": "Are you sure you want to clear all sniffed media and caches?"
   }
 }

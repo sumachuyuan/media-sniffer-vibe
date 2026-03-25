@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncMergeStatus();
 
     // 2. Event Listeners
-    document.getElementById('clearBtn').onclick = () => {
+    document.getElementById('clearBtn').onclick = async () => {
         // Phase 9.9: Safeguard during active task (Recording or Merging)
         // Check for active recording (via UI state or storage flag)
         const isRecording = document.getElementById('record-stop-btn')?.style.display === 'inline-block';
@@ -88,6 +88,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!confirm(t('confirmClearDuringRecord'))) return;
         } else if (state.mergingUrl) {
             if (!confirm(t('confirmClearDuringMerge'))) return;
+        } else {
+            // General safeguard: only confirm if there is actually something to clear
+            try {
+                const response = await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({ type: 'GET_URLS' }, resolve);
+                });
+                if (response && response.urls && response.urls.length > 0) {
+                    if (!confirm(t('confirmClearGeneral'))) return;
+                }
+            } catch (e) {
+                // If message fails, proceed silently or ignore
+            }
         }
 
         if (state.mergingUrl) chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE', url: state.mergingUrl });

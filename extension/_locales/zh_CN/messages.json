@@ -297,5 +297,8 @@
   },
   "confirmClearDuringMerge": {
     "message": "正在合并任务中，清空列表将终止任务并删除临时文件，确定吗？"
+  },
+  "confirmClearGeneral": {
+    "message": "确定要清空所有已嗅探到的媒体列表和缓存吗？"
   }
 }
