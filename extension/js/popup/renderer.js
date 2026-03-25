@@ -96,7 +96,7 @@ export function createUrlItem(item, tab, state, searchTerm = '') {
 
     div.innerHTML = `
         <div class="item-header">
-            <span class="protocol-tag" style="background: ${protocolColor}">${protocol}</span>
+            <span class="protocol-tag" style="color: ${protocolColor}">${protocol}</span>
             <span class="item-title">${highlightText(displayTitle, searchTerm)}</span>
             ${typeBadge}
             ${item.encryption ? `<span class="encrypted-tag">${t('encrypted')}</span>` : ''}

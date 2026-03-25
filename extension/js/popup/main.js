@@ -552,7 +552,11 @@ function renderUrls() {
                 }));
             }
 
-            sorted.forEach(item => list.appendChild(createUrlItem(item, currentTab, state, searchTerm)));
+            sorted.forEach((item, index) => {
+                const itemEl = createUrlItem(item, currentTab, state, searchTerm);
+                itemEl.style.animationDelay = `${index * 0.05}s`;
+                list.appendChild(itemEl);
+            });
             bindEvents(currentTab);
         });
     });
