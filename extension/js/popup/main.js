@@ -499,7 +499,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
-    chrome.runtime.onMessage.addListener(handleRuntimeMessages);
+ // Primary message listener moved to end of file for better scope management
 });
 
 function resetUI() {
@@ -747,7 +747,7 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
     window.activePreviewUid = uid;
 }
 
-function handleRuntimeMessages(m) {
+function handleRuntimeMessages(m, sender, sendResponse) {
     // --- Phase 2: WebCodecs encoding stats ---
     if (m.type === 'RECORD_HW_CHECK') {
       const statsEl = document.getElementById('record-stats');
@@ -932,6 +932,10 @@ function handleRuntimeMessages(m) {
         const isRemux = m.isRemux;
         const isAudioExtract = m.isAudioExtract;
         
+        // Phase 10: Signal to Service Worker that popup is active and handling the export
+        if (m.type === 'FFMPEG_COMPLETE') {
+           if (typeof sendResponse === 'function') sendResponse({ handled: true });
+        }
         if (m.type === 'FFMPEG_COMPLETE' && m.useIDBOutput) {
             if (_isProcessingFinalWrite) {
                 logger.warn('[Popup] FFMPEG_COMPLETE received but a write operation is already in progress. Ignoring duplicate signal.');
@@ -1043,6 +1047,12 @@ function handleRuntimeMessages(m) {
         }
     }
 }
+
+// Global Message Relay for Background/Offscreen Handshake
+chrome.runtime.onMessage.addListener((m, s, r) => {
+    handleRuntimeMessages(m, s, r);
+    return true; // Sustain async sendResponse
+});
 
 function _restoreExportButtons() {
     const saveVideoBtnEl    = document.getElementById('record-save-video-btn');

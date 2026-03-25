@@ -7,6 +7,7 @@ import { decryptBuffer } from './crypto.js';
 
 import {
   loadRemuxInput,
+  loadRemuxOutput,
   deleteRemuxInput,
   saveRemuxOutput,
 } from '../record/storage.js';
@@ -306,20 +307,23 @@ async function handleWebMRemux(m) {
     // record/offscreen.js stores the file as a plain ArrayBuffer in IDB after
     // the worker closes the writable stream — this avoids fileHandle.getFile()
     // which throws SecurityError in a new document context (user activation required).
-    const buffer = await loadRemuxInput();
+    let buffer = await loadRemuxInput();
     if (!buffer) throw new Error('IDB 中未找到录制数据，请重试录制');
 
     logger.info('[Remux] IDB read success, bytes length:', buffer.byteLength);
     const fileSizeMB = (buffer.byteLength / 1024 / 1024).toFixed(1);
     logger.info(`[Remux] Input: ${outputName} (${fileSizeMB} MB from IDB)`);
 
-    const inputBytes = new Uint8Array(buffer);
+    let inputBytes = new Uint8Array(buffer);
 
     sendProgress(20, outputName, '初始化 FFmpeg...');
     ffmpeg = await initFFmpeg(true);
     cleanupFS(ffmpeg);
 
     ffmpeg.FS('writeFile', 'input.webm', inputBytes);
+    // ✅ WASM 已持有数据副本，立即释放 JS 侧引用，允许 GC 回收 input buffer
+    buffer = null;
+    inputBytes = null;
 
     sendProgress(45, outputName, '转封装为 MP4...');
     const mp4Name = outputName.replace(/\.webm$/i, '.mp4');
@@ -335,6 +339,9 @@ async function handleWebMRemux(m) {
     ]);
 
     if (result !== 0) throw new Error('FFmpeg remux 执行失败，请检查 WebM 文件格式');
+
+    // ✅ 先 unlink 输入文件释放 WASM 堆内存，再读取输出，避免 input+output 同时占用 WASM 堆
+    try { ffmpeg.FS('unlink', 'input.webm'); } catch (e) {}
 
     sendProgress(95, outputName, '正在暂存导出文件...');
     const outData = ffmpeg.FS('readFile', 'output.mp4');
@@ -382,17 +389,20 @@ async function handleAudioExtract(m) {
   let ffmpeg = null;
   try {
     sendProgress(5, outputName, '读取录制文件...');
-    const buffer = await loadRemuxInput();
+    let buffer = await loadRemuxInput();
     if (!buffer) throw new Error('IDB 中未找到录制数据，请重试录制');
 
     logger.info('[AudioExtract] IDB read success, bytes length:', buffer.byteLength);
-    const inputBytes = new Uint8Array(buffer);
+    let inputBytes = new Uint8Array(buffer);
 
     sendProgress(20, outputName, '初始化 FFmpeg...');
     ffmpeg = await initFFmpeg(true);
     cleanupFS(ffmpeg);
 
     ffmpeg.FS('writeFile', 'input.webm', inputBytes);
+    // ✅ 释放 JS 侧引用，允许 GC 回收 input buffer
+    buffer = null;
+    inputBytes = null;
 
     sendProgress(45, outputName, '提取音频 (MP3)...');
     const mp3Name = outputName.replace(/\.[^.]+$/, '.mp3');
@@ -406,6 +416,9 @@ async function handleAudioExtract(m) {
     ]);
 
     if (result !== 0) throw new Error('FFmpeg 音频提取失败，请检查录制文件格式');
+
+    // ✅ 先 unlink 输入文件释放 WASM 堆，再读取输出
+    try { ffmpeg.FS('unlink', 'input.webm'); } catch (e) {}
 
     sendProgress(95, outputName, '正在暂存音频文件...');
     const outData = ffmpeg.FS('readFile', 'output.mp3');
@@ -442,6 +455,35 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'START_WEBM_REMUX') handleWebMRemux(m);
   if (m.type === 'START_AUDIO_EXTRACT') handleAudioExtract(m);
   if (m.type === 'CANCEL_FFMPEG_MERGE') isCancelled = true;
+
+  if (m.type === 'OFFSCREEN_TRIGGER_DOWNLOAD') {
+    (async () => {
+      try {
+        logger.info(`[Offscreen] Background download trigger requested for: ${m.filename}`);
+        const buffer = await loadRemuxOutput();
+        if (!buffer) throw new Error('IDB 数据加载失败');
+        
+        const blob = new Blob([buffer], { type: m.isAudioExtract ? 'audio/mpeg' : 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        
+        chrome.downloads.download({
+          url: url,
+          filename: m.filename,
+          saveAs: true
+        }, () => {
+          logger.info('[Offscreen] Background download initiated. Telling background to cleanup.');
+          // Briefly wait to ensure download registry handover
+          setTimeout(() => {
+            URL.revokeObjectURL(url);
+            chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLEANUP_REQ' }).catch(() => {});
+          }, 1000);
+        });
+      } catch (e) {
+        logger.error('[Offscreen] Background download fallback failed', e);
+        chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载失败: ${e.message}` }).catch(() => {});
+      }
+    })();
+  }
 });
 
 chrome.runtime.sendMessage({ type: 'FFMPEG_READY' }).catch(() => { });

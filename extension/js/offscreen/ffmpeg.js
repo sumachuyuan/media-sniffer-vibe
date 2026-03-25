@@ -37,6 +37,24 @@ export async function initFFmpeg(forceNew = false) {
 export async function runFFmpeg(ffmpeg, args) {
     const cleanArgs = (args[0] && args[0].toLowerCase().includes('ffmpeg')) ? args.slice(1) : args;
     logger.info(`Executing: ffmpeg ${cleanArgs.join(' ')}`);
+
+    // Keep the Service Worker alive during long FFmpeg tasks (e.g. 5-10 min remux of 1.39GB).
+    // MV3 SWs are terminated after ~30s of inactivity. We send a heartbeat every 10s via
+    // ffmpeg.setProgress so Chrome resets the SW idle timer without adding fake progress UI.
+    let _swKeepAliveTs = Date.now();
+    ffmpeg.setProgress(({ ratio }) => {
+        const now = Date.now();
+        if (now - _swKeepAliveTs >= 10000) {
+            _swKeepAliveTs = now;
+            chrome.runtime.sendMessage({
+                type: 'FFMPEG_PROGRESS',
+                progress: Math.min(Math.round(ratio * 94), 94), // cap at 94 — never show 100% prematurely
+                stage: 'merging',
+                url: '',
+            }).catch(() => {});
+        }
+    });
+
     try {
         await ffmpeg.run(...cleanArgs);
         return 0;

@@ -375,10 +375,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'START_RECORD_TEST') {
-      if (request._isBackgroundProxy) return; // Ignore loopback from storage/orchestrator.js broadcast
-
-    if (type === 'START_RECORD_TEST') {
-      if (request._isBackgroundProxy) return;
+      if (request._isBackgroundProxy) { sendResponse({ ok: false }); return; }
 
       // getMediaStreamId MUST be called from the SW context (not from the popup).
       chrome.tabCapture.getMediaStreamId({ targetTabId: request.targetTabId }, (streamId) => {
@@ -409,8 +406,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       // Acknowledge immediately to let popup transaction complete.
       sendResponse({ ok: true });
-      return true;
-    }    }
+    }
 
     if (type === 'STOP_RECORD_TEST') {
       // Offscreen is already open — send directly
@@ -504,47 +500,63 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.outputName) state.globalMergeStatus.title = request.outputName;
       chrome.action.setBadgeText({ text: `${Math.round(request.progress)}%` }).catch(() => { });
       chrome.action.setBadgeBackgroundColor({ color: '#ffcc00' }).catch(() => { });
-      chrome.runtime.sendMessage(request).catch(() => { });
+      // Only broadcast to popup if one is currently open — avoids "no channel" error spam
+      if (chrome.extension.getViews({ type: 'popup' }).length > 0) {
+        chrome.runtime.sendMessage(request).catch(() => { });
+      }
       sendResponse({ status: 'progress_updated' });
     }
 
     if (type === 'FFMPEG_COMPLETE' || type === 'FFMPEG_ERROR') {
       state.globalMergeStatus.isMerging = false;
       handleFfmpegDone();
-
-      // Phase 9: Mandatory offscreen teardown after ANY task completes
-      // (Except in debug mode where we might want to keep it open for log inspection)
-      if (typeof DEBUG === 'undefined' || !DEBUG) {
-        closeOffscreen();
-      }
       chrome.action.setBadgeText({ text: '' }).catch(() => { });
       clearDnrRules().catch(logger.error);
-      chrome.runtime.sendMessage(request).catch(() => { });
-
-      // In DEBUG mode, we keep the offscreen document open so the user can inspect logs.
-      const closeOffscreenConditional = () => {
-        if (typeof DEBUG !== 'undefined' && DEBUG) {
-          logger.info('DEBUG mode is ON: Keeping offscreen document open for log inspection.');
-          return;
-        }
-        chrome.offscreen.closeDocument().catch(() => { });
-      };
 
       if (type === 'FFMPEG_COMPLETE') {
         if (request.useIDBOutput) {
-          // Phase 9: Data handled by Popup via IndexedDB.
-          // Background only cleans up the offscreen document.
-          closeOffscreen('ffmpeg');
+          // Phase 10: Adaptive Dual-Track Export.
+          // IMPORTANT: Do NOT call closeOffscreen() here — the offscreen document must remain
+          // alive until the fallback path (OFFSCREEN_TRIGGER_DOWNLOAD) is confirmed or rejected.
+          // closeOffscreen('ffmpeg') is called only after popup/fallback has been determined.
+          chrome.runtime.sendMessage(request, (response) => {
+            if (chrome.runtime.lastError || !response || !response.handled) {
+              // No response from popup (likely closed). Trigger Silent Background Fallback.
+              // The offscreen is still alive here and can handle OFFSCREEN_TRIGGER_DOWNLOAD.
+              logger.info('[Signal] Popup is INACTIVE. Instructing Offscreen to trigger background download.');
+              chrome.runtime.sendMessage({
+                type: 'OFFSCREEN_TRIGGER_DOWNLOAD',
+                filename: request.filename,
+                isAudioExtract: !!request.isAudioExtract
+              }).catch(err => {
+                logger.error('[Signal] Failed to trigger background download on Offscreen', err);
+                closeOffscreen('ffmpeg');
+              });
+            } else {
+              // Popup handled it. Now safe to close offscreen.
+              logger.info('[Signal] Popup is ACTIVE and handled the export. Tearing down offscreen.');
+              closeOffscreen('ffmpeg');
+            }
+          });
         } else {
           // Legacy/Standard FFmpeg flow: trigger download with blobUrl/dataUrl
+          closeOffscreen('ffmpeg'); // Safe to close immediately — data is in blobUrl, not offscreen
+          chrome.runtime.sendMessage(request).catch(() => { });
           chrome.downloads.download(
             { url: request.blobUrl || request.dataUrl, filename: request.filename, saveAs: true },
-            () => closeOffscreen('ffmpeg')
           );
         }
       } else {
+        // FFMPEG_ERROR
         closeOffscreen('ffmpeg');
+        chrome.runtime.sendMessage(request).catch(() => { });
       }
+    }
+
+    if (type === 'OFFSCREEN_CLEANUP_REQ') {
+      logger.info('[Orchestrator] Received background cleanup request. Closing offscreen.');
+      closeOffscreen('ffmpeg');
+      sendResponse({ ok: true });
     }
 
     if (type === 'DEBUG_LOG') {

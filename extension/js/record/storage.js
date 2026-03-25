@@ -93,27 +93,57 @@ function createChunkWritableStream() {
  * This makes the recorded WebM available to the FFmpeg offscreen document.
  */
 async function consolidateChunks() {
+  // Pass 1: collect all chunk buffers and compute total byte length.
+  // Using a single-pass cursor avoids creating an intermediate Blob, which would produce
+  // a double-copy peak (parts[] 1.39GB + blob.arrayBuffer() 1.39GB = 2.78GB).
   const db = await openDB();
-
-  const blob = await new Promise((resolve, reject) => {
+  const { parts, totalBytes } = await new Promise((resolve, reject) => {
     const parts = [];
+    let totalBytes = 0;
     const tx = db.transaction(STORE.chunks, 'readonly');
     const cursor = tx.objectStore(STORE.chunks).openCursor();
     cursor.onsuccess = (e) => {
       const c = e.target.result;
-      if (c) { parts.push(c.value); c.continue(); }
-      else   { db.close(); resolve(new Blob(parts, { type: 'video/webm' })); }
+      if (c) {
+        parts.push(c.value);
+        totalBytes += (c.value instanceof ArrayBuffer) ? c.value.byteLength : c.value.byteLength;
+        c.continue();
+      } else {
+        db.close();
+        resolve({ parts, totalBytes });
+      }
     };
     cursor.onerror = () => { db.close(); reject(cursor.error); };
   });
 
-  const buffer = await blob.arrayBuffer();
+  // Pass 2: single ArrayBuffer allocation + sequential copy — peak = 1× recording size.
+  const buffer = new ArrayBuffer(totalBytes);
+  const view = new Uint8Array(buffer);
+  let offset = 0;
+  for (const chunk of parts) {
+    const src = new Uint8Array(chunk instanceof ArrayBuffer ? chunk : chunk);
+    view.set(src, offset);
+    offset += src.byteLength;
+  }
+  parts.length = 0; // release chunk references for GC
+
+  // Write consolidated buffer to handles store.
   const db2 = await openDB();
   await new Promise((resolve, reject) => {
     const tx = db2.transaction(STORE.handles, 'readwrite');
     tx.objectStore(STORE.handles).put(buffer, KEY.remuxInput);
     tx.oncomplete = () => { db2.close(); resolve(); };
     tx.onerror    = () => { db2.close(); reject(tx.error); };
+  });
+
+  // ✅ Clear the raw chunks store immediately after consolidation to free ~1.39GB IDB quota.
+  // The consolidated ArrayBuffer in handles['remuxInputBlob'] is the single source of truth.
+  const db3 = await openDB();
+  await new Promise((resolve) => {
+    const tx = db3.transaction(STORE.chunks, 'readwrite');
+    tx.objectStore(STORE.chunks).clear();
+    tx.oncomplete = () => { db3.close(); resolve(); };
+    tx.onerror    = () => { db3.close(); resolve(); };
   });
 }
 
