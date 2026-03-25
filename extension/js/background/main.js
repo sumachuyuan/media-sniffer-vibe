@@ -2,7 +2,12 @@
  * Sovereign Media Sniffer - Main Entry (v25.0.0 Modular)
  */
 import { logger, DEBUG } from '../common/logger.js';
-import { state, cleanTab, resetGlobalMergeStatus } from './storage.js';
+import {
+  state,
+  resetGlobalMergeStatus,
+  cleanTab,
+  clearAllData,
+} from './storage.js';
 import {
   MEDIA_SIGNATURES, NOISE_KEYWORDS, isNoiseFragment,
   extractGroupTag, detectMediaType, isValidMediaMime, isVerifiedMedia, normalizeUrl
@@ -256,10 +261,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (state.globalMergeStatus.isMerging) chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE' }).catch(() => { });
       resetGlobalMergeStatus();
       closeOffscreen();
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) cleanTab(tabs[0].id);
-        sendResponse({ status: 'cleared' });
-      });
+      clearAllData();
+      sendResponse({ status: 'cleared' });
     }
 
     if (type === 'CLEAR_RECORD_STORAGE') {

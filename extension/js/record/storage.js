@@ -223,7 +223,7 @@ async function clearSession() {
   if (!db) return;
   return new Promise((resolve) => {
     const tx = db.transaction([STORE.handles, STORE.chunks], 'readwrite');
-    tx.objectStore(STORE.handles).delete(KEY.remuxInput);
+    tx.objectStore(STORE.handles).clear();
     tx.objectStore(STORE.chunks).clear();
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror    = () => { db.close(); resolve(); };

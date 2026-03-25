@@ -48,6 +48,22 @@ export function cleanTab(tabId) {
   }
 }
 
+/**
+ * Nuclear Reset: Clears all tracked media across all tabs, 
+ * flushes the global parsing cache, and resets the record state.
+ */
+export function clearAllData() {
+  state.tabStorage.clear();
+  state.parsingCache.clear();
+  state.processingUrls.clear();
+  state.activeDownloads.clear();
+  state.recordState = { isRecording: false, isConsolidating: false, isReady: false };
+  
+  // Clear all badges
+  chrome.action.setBadgeText({ text: '' }).catch(() => {});
+  logger.info('Global storage reset complete');
+}
+
 export function resetGlobalMergeStatus() {
   state.globalMergeStatus = { isMerging: false, itemId: null, url: null, progress: 0, stage: null };
 }
