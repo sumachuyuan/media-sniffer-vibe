@@ -917,8 +917,9 @@ function handleRuntimeMessages(m) {
             // Phase 9: Handle the final write from the Popup context
             (async () => {
                 logger.info('[Popup] FFMPEG_COMPLETE received (useIDBOutput=true). Starting final write sequence...');
+                let buffer = null;
                 try {
-                    const buffer = await loadRemuxOutput();
+                    buffer = await loadRemuxOutput();
                     if (!buffer) {
                         logger.error('[Popup] FATAL: loadRemuxOutput returned null. IDB Key might be missing.');
                         throw new Error('提取到的导出数据为空');
@@ -955,6 +956,11 @@ function handleRuntimeMessages(m) {
                 ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
             } catch (err) {
                 logger.warn('[Popup] 磁盘直接写入失败，启动 Blob 下载保底方案...', err);
+                if (!buffer) {
+                    logger.error('[Popup] 无法执行 Blob 下载：缓存数据 (buffer) 为空');
+                    ui.showToast(t('error') + ': 数据提取失败', 'error');
+                    return;
+                }
                 const blob = new Blob([buffer], { type: isAudioExtract ? 'audio/mpeg' : 'video/mp4' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
