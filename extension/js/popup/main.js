@@ -85,6 +85,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderUrls();
     syncMergeStatus();
 
+    // Phase 10: Proactive recovery sensor for orphaned large-file tasks
+    chrome.storage.local.get('pendingExportTask', (res) => {
+        if (res.pendingExportTask) {
+            const { filename } = res.pendingExportTask;
+            console.log(`[Popup] Orphaned export task detected for: ${filename}. Waiting for signal...`);
+            // We don't show a toast immediately to avoid clutter, 
+            // but the system is now ready to handle the signal with the correct name.
+        }
+    });
+
     // 2. Event Listeners
     document.getElementById('clearBtn').onclick = () => {
         // --- Stop any in-flight tasks ---
@@ -296,8 +306,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
           });
           await saveFileHandle(handle);
-          // Phase 9: Request writable IMMEDIATELY while we still have user gesture active.
-          // This bypasses the SecurityError if conversion takes > 5-10 seconds.
+          // Phase 10: Persist filename to storage for fallback/resume naming sync
+          chrome.storage.local.set({ 
+            pendingExportTask: { type: 'video', filename: handle.name } 
+          }).catch(() => {});
+          
           _pendingRecordWritable = await handle.createWritable();
         } catch (err) {
           if (err.name === 'AbortError') return;
@@ -332,7 +345,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             types: [{ description: 'MP3 Audio', accept: { 'audio/mpeg': ['.mp3'] } }],
           });
           await saveFileHandle(handle);
-          // Phase 9: Secure the lock on the file BEFORE long-running FFmpeg starts.
+          // Phase 10: Persist filename to storage for fallback/resume naming sync
+          chrome.storage.local.set({ 
+            pendingExportTask: { type: 'audio', filename: handle.name } 
+          }).catch(() => {});
+
           _pendingRecordWritable = await handle.createWritable();
         } catch (err) {
           if (err.name === 'AbortError') return;
@@ -925,6 +942,8 @@ function handleRuntimeMessages(m) {
             // Phase 9: Handle the final write from the Popup context
             (async () => {
                 logger.info('[Popup] FFMPEG_COMPLETE received (useIDBOutput=true). Starting final write sequence...');
+                const { pendingExportTask } = await chrome.storage.local.get('pendingExportTask');
+                const taskFilename = pendingExportTask?.filename;
                 let buffer = null;
                 try {
                     buffer = await loadRemuxOutput();
@@ -973,7 +992,7 @@ function handleRuntimeMessages(m) {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = m.filename || (isAudioExtract ? 'vibe_recording.mp3' : 'vibe_recording.mp4');
+                a.download = taskFilename || m.filename || (isAudioExtract ? 'vibe_recording.mp3' : 'vibe_recording.mp4');
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -983,6 +1002,7 @@ function handleRuntimeMessages(m) {
                 _isProcessingFinalWrite = false;
                 _restoreExportButtons();
                 // Phase 9: Final physical UI teardown after async write completes
+                chrome.storage.local.remove('pendingExportTask').catch(() => {});
                 state.mergingUrl = null;
                 state.mergingProgress = 0;
                 ui.hideMergeBanner();
