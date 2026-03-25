@@ -309,6 +309,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         saveVideoBtn.disabled = true;
         saveVideoBtn.style.opacity = '0.5';
         saveVideoBtn.textContent = t('recordSaveVideo') + '...';
+        if (extractAudioBtn) {
+           extractAudioBtn.disabled = true;
+           extractAudioBtn.style.opacity = '0.5';
+        }
         chrome.runtime.sendMessage({
           type: 'START_WEBM_REMUX',
           outputName: state.recordFilename || 'recording.mp4'
@@ -340,6 +344,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         extractAudioBtn.disabled = true;
         extractAudioBtn.style.opacity = '0.5';
         extractAudioBtn.textContent = t('recordExtracting');
+        if (saveVideoBtn) {
+           saveVideoBtn.disabled = true;
+           saveVideoBtn.style.opacity = '0.5';
+        }
         chrome.runtime.sendMessage({
           type: 'START_AUDIO_EXTRACT',
           outputName: state.recordFilename || 'recording.mp3'
