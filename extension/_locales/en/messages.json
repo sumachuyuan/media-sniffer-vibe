@@ -291,5 +291,11 @@
   },
   "ffmpegBusy": {
     "message": "System busy, please wait for other tasks to complete"
+  },
+  "confirmClearDuringRecord": {
+    "message": "Recording in progress. Clearing the list will terminate the recording and delete all captured data. Are you sure?"
+  },
+  "confirmClearDuringMerge": {
+    "message": "Merging in progress. Clearing the list will terminate the task and delete temporary files. Are you sure?"
   }
 }

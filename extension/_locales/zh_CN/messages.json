@@ -291,5 +291,11 @@
   },
   "ffmpegBusy": {
     "message": "系统忙，请等待其他下载任务完成"
+  },
+  "confirmClearDuringRecord": {
+    "message": "正在录制中，清空列表将终止录制并删除已录制数据，确定吗？"
+  },
+  "confirmClearDuringMerge": {
+    "message": "正在合并任务中，清空列表将终止任务并删除临时文件，确定吗？"
   }
 }

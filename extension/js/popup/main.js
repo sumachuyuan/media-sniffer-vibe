@@ -81,6 +81,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. Event Listeners
     document.getElementById('clearBtn').onclick = () => {
+        // Phase 9.9: Safeguard during active task (Recording or Merging)
+        // Check for active recording (via UI state or storage flag)
+        const isRecording = document.getElementById('record-stop-btn')?.style.display === 'inline-block';
+        if (isRecording) {
+            if (!confirm(t('confirmClearDuringRecord'))) return;
+        } else if (state.mergingUrl) {
+            if (!confirm(t('confirmClearDuringMerge'))) return;
+        }
+
         if (state.mergingUrl) chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE', url: state.mergingUrl });
         resetUI();
         
