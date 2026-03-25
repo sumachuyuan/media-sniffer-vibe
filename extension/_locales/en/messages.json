@@ -300,5 +300,8 @@
   },
   "confirmClearGeneral": {
     "message": "Are you sure you want to clear all sniffed media and caches?"
+  },
+  "confirmClearDuringConsolidate": {
+    "message": "The final file is being generated. Clearing will interrupt this and discard data. Are you sure?"
   }
 }

@@ -300,5 +300,8 @@
   },
   "confirmClearGeneral": {
     "message": "确定要清空所有已嗅探到的媒体列表和缓存吗？"
+  },
+  "confirmClearDuringConsolidate": {
+    "message": "正在为您生成最终视频文件，清空列表会导致生成中断且无法找回，确定吗？"
   }
 }

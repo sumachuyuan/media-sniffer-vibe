@@ -36,7 +36,7 @@ adoptExistingOffscreen();
 function _setRecordState(patch) {
   chrome.storage.local.get('recordingState', (res) => {
     const prev = res?.recordingState || {};
-    chrome.storage.local.set({ recordingState: { ...prev, ...patch } }).catch(() => {});
+    chrome.storage.local.set({ recordingState: { ...prev, ...patch } }).catch(() => { });
   });
 }
 
@@ -266,8 +266,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'CLEAR_RECORD_STORAGE') {
-      // Phase 8.4: Forward IDB clear request to the persistent record offscreen
-      dispatchToRecordOffscreen({ type: 'CLEAR_RECORD_IDB' });
+      // Forward IDB clear request to the persistent record offscreen.
+      // Must use 'CLEAR_RECORD_STORAGE' to match the handler in record/offscreen.js.
+      dispatchToRecordOffscreen({ type: 'CLEAR_RECORD_STORAGE' });
       sendResponse({ ok: true });
     }
 
@@ -376,39 +377,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (type === 'START_RECORD_TEST') {
       if (request._isBackgroundProxy) return; // Ignore loopback from storage/orchestrator.js broadcast
 
-      // getMediaStreamId MUST be called from the SW context (not from the popup).
-      // Chrome docs: "If called by a service worker, the stream ID can be used by any
-      // document of the extension. Otherwise the stream ID can only be used by the
-      // calling frame." Calling from the popup would make the streamId unusable in the
-      // offscreen document, causing getUserMedia to fail with "Error starting tab capture".
-      chrome.tabCapture.getMediaStreamId({ targetTabId: request.targetTabId }, (streamId) => {
-        if (chrome.runtime.lastError || !streamId) {
-          const err = chrome.runtime.lastError?.message || '无法获取标签页捕获 ID';
-          logger.error(`[Record] getMediaStreamId failed: ${err}`);
-          _setRecordState({ isRecording: false, isConsolidating: false, isReady: false });
-          chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => {});
-          return;
-        }
-        // fileHandle is NOT passed here — it is stored in IndexedDB by the popup
-        // and retrieved directly by the offscreen document, bypassing IPC serialization.
-        dispatchToRecordOffscreen({
-          type: 'START_RECORD_TEST',
-          streamId,
-          quality: request.quality,
-          isAudioOnly: request.isAudioOnly || false,
-          filename: request.filename,
+      // Phase 9.9.5: Immediate response to popup. 
+      // Sending response BEFORE the heavy API call helps the popup stay open on macOS.
+      sendResponse({ ok: true });
+
+      // Small delay ensures the message channel is settled before focus-stealing API runs.
+      setTimeout(() => {
+        // getMediaStreamId MUST be called from the SW context (not from the popup).
+        // Chrome docs: "If called by a service worker, the stream ID can be used by any
+        // document of the extension. Otherwise the stream ID can only be used by the
+        // calling frame." Calling from the popup would make the streamId unusable in the
+        // offscreen document, causing getUserMedia to fail with "Error starting tab capture".
+        chrome.tabCapture.getMediaStreamId({ targetTabId: request.targetTabId }, (streamId) => {
+          if (chrome.runtime.lastError || !streamId) {
+            const err = chrome.runtime.lastError?.message || '无法获取标签页捕获 ID';
+            logger.error(`[Record] getMediaStreamId failed: ${err}`);
+            _setRecordState({ isRecording: false, isConsolidating: false, isReady: false });
+            chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
+            return;
+          }
+          // fileHandle is NOT passed here — it is stored in IndexedDB by the popup
+          // and retrieved directly by the offscreen document, bypassing IPC serialization.
+          dispatchToRecordOffscreen({
+            type: 'START_RECORD_TEST',
+            streamId,
+            quality: request.quality,
+            isAudioOnly: request.isAudioOnly || false,
+            filename: request.filename,
+          });
+          // Persist recording state so popup can restore UI after being reopened.
+          _setRecordState({
+            isRecording: true,
+            isConsolidating: false,
+            isReady: false,
+            startTime: Date.now(),
+            filename: request.filename || null,
+            quality: request.quality || '1080P',
+          });
         });
-        // Persist recording state so popup can restore UI after being reopened.
-        _setRecordState({
-          isRecording: true,
-          isConsolidating: false,
-          isReady: false,
-          startTime: Date.now(),
-          filename: request.filename || null,
-          quality: request.quality || '1080P',
-        });
-      });
-      sendResponse({ status: 'dispatched' });
+      }, 100);
+      return true; // Keep channel open for the async part (though we respond early)
     }
 
     if (type === 'STOP_RECORD_TEST') {
@@ -510,7 +518,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (type === 'FFMPEG_COMPLETE' || type === 'FFMPEG_ERROR') {
       state.globalMergeStatus.isMerging = false;
       handleFfmpegDone();
-      
+
       // Phase 9: Mandatory offscreen teardown after ANY task completes
       // (Except in debug mode where we might want to keep it open for log inspection)
       if (typeof DEBUG === 'undefined' || !DEBUG) {

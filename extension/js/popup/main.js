@@ -86,50 +86,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncMergeStatus();
 
     // 2. Event Listeners
-    document.getElementById('clearBtn').onclick = async () => {
-        // Phase 9.9: Safeguard during active task (Recording or Merging)
-        // Check for active recording (via UI state or storage flag)
-        const isRecording = document.getElementById('record-stop-btn')?.style.display === 'inline-block';
-        if (isRecording) {
-            if (!confirm(t('confirmClearDuringRecord'))) return;
-        } else if (state.mergingUrl) {
-            if (!confirm(t('confirmClearDuringMerge'))) return;
-        } else {
-            // General safeguard: only confirm if there is actually something to clear
-            try {
-                const response = await new Promise((resolve) => {
-                    chrome.runtime.sendMessage({ type: 'GET_URLS' }, resolve);
-                });
-                if (response && response.urls && response.urls.length > 0) {
-                    if (!confirm(t('confirmClearGeneral'))) return;
-                }
-            } catch (e) {
-                // If message fails, proceed silently or ignore
-            }
-        }
-
+    document.getElementById('clearBtn').onclick = () => {
+        // --- Stop any in-flight tasks ---
         if (state.mergingUrl) chrome.runtime.sendMessage({ type: 'CANCEL_FFMPEG_MERGE', url: state.mergingUrl });
+        // Terminate recording worker before clearing IDB so the offscreen does not
+        // race against clearSession() with a consolidation write still in flight.
+        chrome.runtime.sendMessage({ type: 'STOP_RECORD_TEST' });
         resetUI();
-        
-        // Phase 8.4: Global Reset
-        // 1. Clear UI state
+
+        // --- Recording panel: physical UI reset ---
+        // 1. Kill timer and hide it
+        stopRecordingTimer();
+
+        // 2. Reset indicator dot to idle grey
+        const dotEl = document.getElementById('record-indicator');
+        if (dotEl) { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
+
+        // 3. Restore start-btn; hide stop-btn; re-enable quality selector and audio-only toggle
+        const startBtnEl = document.getElementById('record-start-btn');
+        const stopBtnEl  = document.getElementById('record-stop-btn');
+        const qualityEl  = document.getElementById('record-quality');
+        const audioOnlyEl = document.getElementById('record-audio-only');
+        if (startBtnEl) { startBtnEl.disabled = false; startBtnEl.style.opacity = '1'; }
+        if (stopBtnEl)  { stopBtnEl.style.display = 'none'; }
+        if (qualityEl)  { qualityEl.disabled = false; qualityEl.style.opacity = '1'; qualityEl.style.display = ''; }
+        if (audioOnlyEl) { audioOnlyEl.disabled = false; }
+
+        // 4. Hide stats panel and export buttons; clear in-memory filename
         state.recordFilename = null;
         const statsEl = document.getElementById('record-stats');
         if (statsEl) statsEl.style.display = 'none';
-        
-        const stopBtnEl = document.getElementById('record-stop-btn');
-        const saveVideoBtnEl = document.getElementById('record-save-video-btn');
+        const saveVideoBtnEl   = document.getElementById('record-save-video-btn');
         const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
-        if (stopBtnEl) stopBtnEl.style.display = ''; // restore default stop btn (disabled)
-        if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
+        if (saveVideoBtnEl)    saveVideoBtnEl.style.display = 'none';
         if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
 
-        // 2. Clear persistence
-        chrome.storage.local.set({ recordingState: { isRecording: false, isReady: false } }).catch(() => {});
-        
-        // 3. Clear IndexedDB storage in offscreen
+        // --- Persistence & deep storage reset ---
+        // 5. Clear chrome.storage persisted recording state
+        chrome.storage.local.set({ recordingState: { isRecording: false, isConsolidating: false, isReady: false } }).catch(() => {});
+
+        // 6. Clear IndexedDB (chunks + handles) via record offscreen
         chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' });
 
+        // 7. Clear sniffed URL list and badges
         chrome.runtime.sendMessage({ type: 'CLEAR_URLS' }, () => {
             ui.showToast(t('toastListCleared'));
             renderUrls();

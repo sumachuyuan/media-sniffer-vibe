@@ -215,8 +215,9 @@ async function loadFileHandle() {
 // ---------------------------------------------------------------------------
 
 /**
- * Clear all chunk segments and delete the remux input blob.
- * Call before starting a new recording to ensure a clean slate.
+ * Full physical reset: clears ALL entries from both 'chunks' and 'handles' stores,
+ * including remuxInputBlob, remuxOutputBuffer, and currentFileHandle.
+ * Call before starting a new recording, or on explicit user-initiated clear.
  */
 async function clearSession() {
   const db = await openDB().catch(() => null);
