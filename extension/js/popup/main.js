@@ -100,7 +100,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 2. Reset indicator dot to idle grey
         const dotEl = document.getElementById('record-indicator');
-        if (dotEl) { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
+        if (dotEl) {
+            dotEl.style.background = '#444';
+            dotEl.style.boxShadow = 'none';
+            dotEl.classList.remove('record-indicator-breathing');
+        }
 
         // 3. Restore start-btn; hide stop-btn; re-enable quality selector and audio-only toggle
         const startBtnEl = document.getElementById('record-start-btn');
@@ -258,6 +262,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       stopBtn.style.background = 'rgba(255,60,60,0.08)';
       dotEl.style.background = '#ff5252';
       dotEl.style.boxShadow = '0 0 6px #ff5252';
+      dotEl.classList.add('record-indicator-breathing');
       statsEl.style.display = 'block';
       statsEl.innerHTML =
         t('recordWaitingEncoder') +
@@ -274,6 +279,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       stopBtn.style.background = 'rgba(255,255,255,0.03)';
       dotEl.style.background = '#888';
       dotEl.style.boxShadow = 'none';
+      dotEl.classList.remove('record-indicator-breathing');
       if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
     };
 
@@ -386,7 +392,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     stopBtn.style.background = 'rgba(255,60,60,0.08)';
                 }
                 if (qualityEl) { qualityEl.disabled = true; qualityEl.style.opacity = '0.4'; }
-                if (dotEl) { dotEl.style.background = '#ff5252'; dotEl.style.boxShadow = '0 0 6px #ff5252'; }
+                if (dotEl) { 
+                    dotEl.style.background = '#ff5252'; 
+                    dotEl.style.boxShadow = '0 0 6px #ff5252'; 
+                    dotEl.classList.add('record-indicator-breathing');
+                }
                 if (statsEl) {
                     statsEl.style.display = 'block';
                     statsEl.innerHTML = `<span style="color:#00e676">${t('recordWaitingStats')}</span>`;
@@ -418,7 +428,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
                 if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
-                if (dotEl) { dotEl.style.background = '#444'; dotEl.style.boxShadow = 'none'; }
+                if (dotEl) { 
+                    dotEl.style.background = '#444'; 
+                    dotEl.style.boxShadow = 'none'; 
+                    dotEl.classList.remove('record-indicator-breathing');
+                }
                 
                 if (stopBtn) stopBtn.style.display = 'none';
                 if (saveVideoBtn) {
