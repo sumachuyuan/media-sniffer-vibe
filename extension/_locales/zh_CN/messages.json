@@ -266,6 +266,9 @@
   "recordExtractAudio": {
     "message": "提取音频"
   },
+  "recordExportWarning": {
+    "message": "正在保存，请勿关闭插件弹窗。"
+  },
   "recordAudioExtracting": {
     "message": "⏳ 正在提取 MP3..."
   },

@@ -1077,7 +1077,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
             const _ewStatsP = document.getElementById('record-stats');
             if (_ewStatsP) {
                 document.getElementById('record-export-warning')?.remove();
-                _ewStatsP.insertAdjacentHTML('beforeend', '<div id="record-export-warning" style="color:#ff5252;font-weight:800;margin-top:10px;text-align:center;">正在保存，请勿关闭插件弹窗。</div>');
+                _ewStatsP.insertAdjacentHTML('beforeend', '<div id="record-export-warning" style="color:#ff5252;font-weight:800;margin-top:10px;text-align:center;">${t('recordExportWarning')}</div>');
             }
         }
     } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
@@ -1099,7 +1099,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
             const _ewStatsC = document.getElementById('record-stats');
             if (_ewStatsC) {
                 document.getElementById('record-export-warning')?.remove();
-                _ewStatsC.insertAdjacentHTML('beforeend', '<div id="record-export-warning" style="color:#ff5252;font-weight:800;margin-top:10px;text-align:center;">正在保存，请勿关闭插件弹窗。</div>');
+                _ewStatsC.insertAdjacentHTML('beforeend', '<div id="record-export-warning" style="color:#ff5252;font-weight:800;margin-top:10px;text-align:center;">${t('recordExportWarning')}</div>');
             }
 
             (async () => {

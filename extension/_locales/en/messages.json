@@ -266,6 +266,9 @@
   "recordExtractAudio": {
     "message": "MP3"
   },
+  "recordExportWarning": {
+    "message": "Exporting in progress, please do not close the popup."
+  },
   "recordAudioExtracting": {
     "message": "⏳ Extracting MP3..."
   },
