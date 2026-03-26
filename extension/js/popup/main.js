@@ -67,6 +67,9 @@ function stopRecordingTimer() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    const verEl = document.querySelector('[data-version]');
+    if (verEl) verEl.textContent = 'V' + chrome.runtime.getManifest().version;
+
     // 0. Initialize i18n
     await i18n.init();
 
