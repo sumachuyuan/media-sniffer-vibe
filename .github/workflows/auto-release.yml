@@ -35,7 +35,7 @@ jobs:
 
       - name: Create Release Zip
         run: |
-          zip -r media-sniffer-vibe-v${{ env.VERSION }}.zip extension/ README.md LICENSE PRIVACY_POLICY.md
+          zip -r media-sniffer-vibe-v${{ env.VERSION }}.zip extension/
 
       - name: Sync GitHub Release
         uses: softprops/action-gh-release@v2

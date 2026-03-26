@@ -468,6 +468,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           logger.error(`[Record] getMediaStreamId failed: ${err}`);
           _setRecordState({ isRecording: false, isConsolidating: false, isReady: false });
           chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err }).catch(() => { });
+          sendResponse({ error: err }); // CRITICAL: Acknowledge the original request
           return;
         }
 

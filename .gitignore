@@ -7,6 +7,8 @@ docs/
 .gemini/
 .agent/
 .agents/
+package.json
+playwright.config.js
 
 # 3. OS Metadata & Temporary Files
 .DS_Store
@@ -27,7 +29,18 @@ Thumbs.db
 node_modules/
 package-lock.json
 
-# 6. Build & Scripts (if any)
+# 6. BMAD & AI Framework Data
+_bmad/
+_bmad-output/
+.claude/
+
+# 7. Test Reports & Playwright
+playwright-report/
+test-results/
+recordings/
+tests/
+
+# 9. Build & Scripts (if any)
 dist/
 build/
 bin/

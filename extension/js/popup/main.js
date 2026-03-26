@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         chrome.runtime.sendMessage({ type: 'GET_MERGE_STATUS' }, (mergeStatus) => {
             if (!mergeStatus?.isMerging) {
                 logger.info('[Popup] Backend idle on open — clearing stale pendingExportTask.');
-                chrome.storage.local.remove('pendingExportTask').catch(() => {});
+                chrome.storage.local.remove('pendingExportTask').catch(() => { });
             }
         });
     });
@@ -518,7 +518,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         } else {
                             // Backend is idle — marker is a stale remnant. Clear and unlock.
                             logger.info('[Popup] pendingExportTask is stale (backend idle) — clearing and restoring buttons.');
-                            chrome.storage.local.remove('pendingExportTask').catch(() => {});
+                            chrome.storage.local.remove('pendingExportTask').catch(() => { });
                             _restoreExportButtons();
                         }
                     });
