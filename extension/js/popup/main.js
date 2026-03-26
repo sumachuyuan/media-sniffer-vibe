@@ -89,12 +89,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderUrls();
     syncMergeStatus();
 
-    // Recovery sensor: if an export task was in-flight when the popup was closed,
-    // the double-trigger guard (in the isReady block below) will disable export buttons.
+    // Recovery sensor: if a stale pendingExportTask marker exists but the backend is
+    // already idle, clear it eagerly so the double-trigger guard cannot lock buttons.
     chrome.storage.local.get('pendingExportTask', (res) => {
-        if (res.pendingExportTask) {
-            logger.info(`[Popup] Pending export task detected: ${res.pendingExportTask.filename}`);
-        }
+        if (!res.pendingExportTask) return;
+        logger.info(`[Popup] pendingExportTask detected on open: ${res.pendingExportTask.filename} — verifying backend state...`);
+        chrome.runtime.sendMessage({ type: 'GET_MERGE_STATUS' }, (mergeStatus) => {
+            if (!mergeStatus?.isMerging) {
+                logger.info('[Popup] Backend idle on open — clearing stale pendingExportTask.');
+                chrome.storage.local.remove('pendingExportTask').catch(() => {});
+            }
+        });
     });
 
     // 2. Event Listeners
@@ -400,9 +405,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const lastHb = result?.recordLastHeartbeat ?? 0;
                 const heartbeatStale = lastHb > 0 && (Date.now() - lastHb) > 15000;
                 if (!backendActive || heartbeatStale) {
-                    // Stale / crashed state — reset everything.
+                    // Stale / crashed state — reset recording UI and clear stuck state.
+                    _isRecordingActive = false;
                     chrome.storage.local.set({ recordingState: { isRecording: false, isConsolidating: false }, recordLastHeartbeat: 0 }).catch(() => { });
                     chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' });
+                    _applyGlobalLock(); // release Lock A so URL-list buttons re-enable
                     return;
                 }
 
@@ -485,21 +492,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // Double-trigger guard: if an export is already in-flight (picker was
                 // opened before popup closed), lock the buttons instead of re-enabling.
+                // v1.48.9: verify with the backend first — if no task is running the
+                // marker is stale and must be cleared so buttons are not permanently locked.
                 chrome.storage.local.get('pendingExportTask', (taskRes) => {
                     if (!taskRes.pendingExportTask) return;
-                    const busyText = '正在写入中...';
-                    if (saveVideoBtn && saveVideoBtn.style.display !== 'none') {
-                        saveVideoBtn.disabled = true;
-                        saveVideoBtn.style.opacity = '0.5';
-                        saveVideoBtn.style.cursor = 'not-allowed';
-                        saveVideoBtn.textContent = busyText;
-                    }
-                    if (extractAudioBtn && extractAudioBtn.style.display !== 'none') {
-                        extractAudioBtn.disabled = true;
-                        extractAudioBtn.style.opacity = '0.5';
-                        extractAudioBtn.style.cursor = 'not-allowed';
-                        extractAudioBtn.textContent = busyText;
-                    }
+                    chrome.runtime.sendMessage({ type: 'GET_MERGE_STATUS' }, (mergeStatus) => {
+                        if (mergeStatus?.isMerging) {
+                            // Genuinely in progress — keep buttons locked.
+                            const busyText = '正在写入中...';
+                            if (saveVideoBtn && saveVideoBtn.style.display !== 'none') {
+                                saveVideoBtn.disabled = true;
+                                saveVideoBtn.style.opacity = '0.5';
+                                saveVideoBtn.style.cursor = 'not-allowed';
+                                saveVideoBtn.textContent = busyText;
+                            }
+                            if (extractAudioBtn && extractAudioBtn.style.display !== 'none') {
+                                extractAudioBtn.disabled = true;
+                                extractAudioBtn.style.opacity = '0.5';
+                                extractAudioBtn.style.cursor = 'not-allowed';
+                                extractAudioBtn.textContent = busyText;
+                            }
+                        } else {
+                            // Backend is idle — marker is a stale remnant. Clear and unlock.
+                            logger.info('[Popup] pendingExportTask is stale (backend idle) — clearing and restoring buttons.');
+                            chrome.storage.local.remove('pendingExportTask').catch(() => {});
+                            _restoreExportButtons();
+                        }
+                    });
                 });
             }
         });

@@ -20,6 +20,20 @@ let _activeOffscreenType = null;
 let isRecordOffscreenActive = false;
 let pendingRecordCommand = null;
 
+// isCapturing: true ONLY while tab capture frames are actively being produced.
+// The record offscreen stays alive after capture stops (during IDB consolidation),
+// so isCapturing lets FFmpeg be dispatched once the live stream has ended.
+let isCapturing = false;
+
+export function setCapturing(value) {
+  isCapturing = value;
+  logger.info(`[Orchestrator] isCapturing → ${value}`);
+}
+
+export function getIsCapturing() {
+  return isCapturing;
+}
+
 export async function updateDnrRulesForFetch(referer, ua, urlFilter = '*', scopeToExtension = false) {
   const ruleId = 1001;
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
@@ -72,6 +86,7 @@ export async function closeAnyOffscreen() {
     }
   }
   isRecordOffscreenActive = false;
+  isCapturing = false;
   _isFfmpegBusy = false;
   _activeOffscreenType = null;
   pendingOffscreenCommand = null;
@@ -124,16 +139,22 @@ function buildMergeCommand(data) {
 async function dispatchToOffscreen(command) {
   logger.info('[Orchestrator] Dispatching command to Offscreen:', command.type);
 
-  if (isRecordOffscreenActive) {
-    // Full isolation: ANY FFmpeg command is rejected while recording is active.
-    // No preemption — recording is never killed to make room for another task.
-    logger.warn(`[Orchestrator] ${command.type} blocked: recording is active. Not preempting.`);
+  if (isCapturing) {
+    // Live capture is running — reject to protect the active stream.
+    logger.warn(`[Orchestrator] ${command.type} blocked: capture is active. Not preempting.`);
     chrome.runtime.sendMessage({
       type: 'FFMPEG_ERROR',
       error: '正在录制中，请先停止录制再发起合并',
       url: command.manifestUrl || command.url || '',
     }).catch(() => {});
     return;
+  }
+
+  if (isRecordOffscreenActive) {
+    // Capture has stopped but the record offscreen is still alive (IDB consolidation).
+    // Safe to close it and make room for FFmpeg.
+    logger.info(`[Orchestrator] ${command.type}: capture stopped, record offscreen lingering — closing before FFmpeg dispatch.`);
+    await closeOffscreen('record');
   }
 
   if (_isFfmpegBusy) {
@@ -374,6 +395,7 @@ export async function closeOffscreen(type) {
   _activeOffscreenType = null;
   _isFfmpegBusy = false;
   isRecordOffscreenActive = false;
+  isCapturing = false;
 }
 
 /**

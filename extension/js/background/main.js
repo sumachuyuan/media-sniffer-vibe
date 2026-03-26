@@ -19,6 +19,7 @@ import {
   handleFfmpegDone, handleOffscreenReady, clearDnrRules, updateDnrRulesForFetch,
   dispatchToRecordOffscreen, handleRecordOffscreenReady, closeRecordOffscreen,
   getIsRecordActive, createRecordOffscreen, closeOffscreen, adoptExistingOffscreen,
+  setCapturing, getIsCapturing,
 } from './orchestrator.js';
 
 // Phase 9.9: Self-healing at Service Worker startup.
@@ -357,6 +358,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'START_WEBM_REMUX') {
+      // Pre-clear: if capture has already stopped but the record offscreen is still alive
+      // (IDB consolidation), close it now so FFmpeg can take the single offscreen slot.
+      if (!getIsCapturing() && getIsRecordActive()) {
+        logger.info('[SW] START_WEBM_REMUX: pre-clearing lingering record offscreen.');
+        await closeRecordOffscreen();
+      }
       // Phase 5: Post-recording WebM → MP4 container remux via FFmpeg.wasm (no re-encode).
       state.globalMergeStatus = {
         isMerging: true,
@@ -464,6 +471,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
+        setCapturing(true);
         dispatchToRecordOffscreen({
           type: 'START_RECORD_TEST',
           streamId,
@@ -508,6 +516,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.runtime.sendMessage(request).catch(() => { });
 
       if (type === 'RECORD_STOPPED') {
+        // Capture frames have stopped — FFmpeg dispatch is now safe once IDB consolidates.
+        setCapturing(false);
         // isConsolidating = true: popup shows "正在写入..." until RECORD_BLOB_READY arrives.
         _setRecordState({
           isRecording: false,
@@ -519,6 +529,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       }
       if (type === 'RECORD_ERROR') {
+        setCapturing(false);
         _setRecordState({ isRecording: false, isConsolidating: false, isReady: false });
       }
 
@@ -544,6 +555,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'START_AUDIO_EXTRACT') {
+      // Pre-clear: same as START_WEBM_REMUX — close lingering record offscreen if safe.
+      if (!getIsCapturing() && getIsRecordActive()) {
+        logger.info('[SW] START_AUDIO_EXTRACT: pre-clearing lingering record offscreen.');
+        await closeRecordOffscreen();
+      }
       state.globalMergeStatus = {
         isMerging: true,
         itemId: null,
