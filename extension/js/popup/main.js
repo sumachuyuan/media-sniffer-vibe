@@ -326,6 +326,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             _isRemuxing = true;
+            const _ewStats = document.getElementById('record-stats');
+            if (_ewStats) _ewStats.innerHTML = '<div id="record-export-warning" style="color:#ff5252;font-weight:800;margin-bottom:8px;text-align:center;">⚠️ 正在导出，请勿关闭插件弹窗</div>' + _ewStats.innerHTML;
             saveVideoBtn.disabled = true;
             saveVideoBtn.style.opacity = '0.5';
             saveVideoBtn.textContent = t('recordSaveVideo') + '...';
@@ -362,6 +364,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             _isAudioExtracting = true;
+            const _ewStats2 = document.getElementById('record-stats');
+            if (_ewStats2) _ewStats2.innerHTML = '<div id="record-export-warning" style="color:#ff5252;font-weight:800;margin-bottom:8px;text-align:center;">⚠️ 正在导出，请勿关闭插件弹窗</div>' + _ewStats2.innerHTML;
             extractAudioBtn.disabled = true;
             extractAudioBtn.style.opacity = '0.5';
             extractAudioBtn.textContent = t('recordExtracting');
@@ -1072,6 +1076,13 @@ function handleRuntimeMessages(m, sender, sendResponse) {
             const btn = document.getElementById('record-save-video-btn');
             if (btn) btn.textContent = t('recordSaveVideo') + ' ' + Math.round(m.progress) + '%';
         }
+        // Ensure export warning persists in #record-stats during FFmpeg progress updates
+        if (_isRemuxing || _isAudioExtracting) {
+            const _ewStatsP = document.getElementById('record-stats');
+            if (_ewStatsP && !document.getElementById('record-export-warning')) {
+                _ewStatsP.innerHTML = '<div id="record-export-warning" style="color:#ff5252;font-weight:800;margin-bottom:8px;text-align:center;">⚠️ 正在导出，请勿关闭插件弹窗</div>' + _ewStatsP.innerHTML;
+            }
+        }
     } else if (m.type === 'FFMPEG_COMPLETE' || m.type === 'FFMPEG_ERROR') {
         const isProxy = m.isProxy;
         const isRemux = m.isRemux;
@@ -1087,7 +1098,6 @@ function handleRuntimeMessages(m, sender, sendResponse) {
                 return;
             }
             _isProcessingFinalWrite = true;
-            document.getElementById('export-write-warning')?.style.setProperty('display', 'block');
 
             (async () => {
                 logger.info('[Popup] FFMPEG_COMPLETE received (useIDBOutput=true). Starting final write sequence...');
@@ -1153,7 +1163,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
                     ui.showToast(t(isAudioExtract ? 'recordAudioComplete' : 'recordRemuxComplete'), 'success');
                 } finally {
                     _isProcessingFinalWrite = false;
-                    document.getElementById('export-write-warning')?.style.setProperty('display', 'none');
+                    document.getElementById('record-export-warning')?.remove();
                     _restoreExportButtons();
                     chrome.storage.local.remove('pendingExportTask').catch(() => { });
                     state.mergingUrl = null;
