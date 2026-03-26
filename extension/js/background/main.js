@@ -620,8 +620,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Forward FFMPEG_COMPLETE so popup can write via FileSystemFileHandle.
             // isMerging stays TRUE until EXPORT_SUCCESS confirms the write completed.
             // Offscreen stays alive as a fallback in case popup closes mid-write.
-            logger.info('[Signal] Popup ACTIVE — forwarding FFMPEG_COMPLETE and arming write watchdog.');
-            chrome.runtime.sendMessage(request).catch(() => { });
+            logger.info('[Signal] Popup ACTIVE — arming write watchdog (popup receives FFMPEG_COMPLETE directly from offscreen).');
 
             // Save request for potential Track B fallback
             _exportPendingReq = { filename: request.filename, isAudioExtract: !!request.isAudioExtract };
