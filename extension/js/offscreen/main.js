@@ -167,7 +167,7 @@ async function handleMergeSegments(m) {
             const resp = await fetch(url, { credentials: 'include' });
             if (!resp.ok) {
               errorMsg = `Status ${resp.status}`;
-              logger.warn(`Worker ${workerId} segment ${index} failed: ${errorMsg}`);
+              logger.debug(`Worker ${workerId} segment ${index} failed: ${errorMsg}`);
               if (!RETRYABLE_STATUSES.has(resp.status)) throw new Error(errorMsg);
             } else {
               buf = new Uint8Array(await resp.arrayBuffer());
@@ -176,7 +176,7 @@ async function handleMergeSegments(m) {
             }
           } catch (e) {
             errorMsg = e.message;
-            logger.warn(`Worker ${workerId} segment ${index} fetch error: ${errorMsg}`);
+            logger.debug(`Worker ${workerId} segment ${index} fetch error: ${errorMsg}`);
           }
 
           if (++attempt >= MAX_ATTEMPTS) throw new Error(errorMsg || 'Max attempts reached');

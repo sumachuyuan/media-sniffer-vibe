@@ -140,7 +140,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 4. Hide stats panel and export buttons; clear in-memory filename
         state.recordFilename = null;
         const statsEl = document.getElementById('record-stats');
-        if (statsEl) statsEl.style.display = 'none';
+        if (statsEl) { statsEl.style.display = 'none'; statsEl.innerHTML = ''; } // Phase 10: Clear text to prevent stale errors on revisit
         const saveVideoBtnEl = document.getElementById('record-save-video-btn');
         const extractAudioBtnEl = document.getElementById('record-extract-audio-btn');
 
@@ -148,7 +148,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (stopBtnEl) { stopBtnEl.style.display = 'none'; stopBtnEl.disabled = true; } // Hide stop btn
         if (qualityEl) { qualityEl.disabled = false; qualityEl.style.opacity = '1'; }
         if (audioOnlyEl) audioOnlyEl.disabled = false;
-        if (statsEl) statsEl.style.display = 'none';
         if (saveVideoBtnEl) saveVideoBtnEl.style.display = 'none';
         if (extractAudioBtnEl) extractAudioBtnEl.style.display = 'none';
 
@@ -1187,6 +1186,12 @@ function handleRuntimeMessages(m, sender, sendResponse) {
                     ui.hideMergeBanner();
                     _applyGlobalLock(); // release Lock B now that all export flags are cleared
                     chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => { });
+
+                    // Clear record-stats after 8 seconds on success to keep UI clean
+                    setTimeout(() => {
+                        const s = document.getElementById('record-stats');
+                        if (s) { s.innerHTML = ''; s.style.display = 'none'; }
+                    }, 8000);
                 }
             })();
             return;
