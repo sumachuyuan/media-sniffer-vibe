@@ -378,11 +378,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'START_FFMPEG_MERGE') {
-      // Gate: reject immediately if recording is active (belt-and-suspenders behind Lock A + orchestrator).
-      if (getIsRecordActive()) {
-        logger.warn('[SW] START_FFMPEG_MERGE rejected — recording is active.');
+      // Gate: reject only if active capture is running.
+      if (getIsCapturing()) {
+        logger.warn('[SW] START_FFMPEG_MERGE rejected — recording is actively capturing.');
         sendResponse({ error: '正在录制中，请先停止录制再发起合并' });
         return;
+      }
+      // Pre-clear: if a record offscreen is alive but idle/consolidating, close it to make room for FFmpeg.
+      if (getIsRecordActive()) {
+        logger.info('[SW] START_FFMPEG_MERGE: pre-clearing lingering record offscreen.');
+        await closeRecordOffscreen();
       }
       logger.info(`START_FFMPEG_MERGE initiated for: ${request.outputName}`, { segments: request.segments?.length });
       state.globalMergeStatus = {
@@ -532,6 +537,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (type === 'RECORD_ERROR') {
         setCapturing(false);
         _setRecordState({ isRecording: false, isConsolidating: false, isReady: false });
+        closeRecordOffscreen();
       }
 
       // Do NOT close the record offscreen here. record/offscreen.js is still

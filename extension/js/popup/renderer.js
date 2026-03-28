@@ -158,7 +158,7 @@ export function renderCompanion(v, a, currentTab, state, onMerge) {
         </div>
     `;
     div.querySelector('#compMerge').onclick = () => {
-        if (state.mergingUrl) return;
+        if (state.mergingUrl || state.isRecordingActive) return;
         div.querySelector('.companion-actions').style.display = 'none';
         div.querySelector('#companion-progress').style.display = 'block';
         onMerge(v, a);

@@ -23,6 +23,7 @@ let state = {
     recordFilename: null,
     recordingStartTime: null,
     isAudioOnly: false,
+    isRecordingActive: false,
 };
 
 // Phase 6: timer + I/O recovery state
@@ -289,6 +290,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             `&nbsp;&nbsp;<span style="color:#555">${quality}</span>`;
         // Lock A: prevent URL list actions while recording
         _isRecordingActive = true;
+        state.isRecordingActive = true;
         _applyGlobalLock();
     };
 
@@ -410,6 +412,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (!backendActive || heartbeatStale) {
                     // Stale / crashed state — reset recording UI and clear stuck state.
                     _isRecordingActive = false;
+                    state.isRecordingActive = false;
                     chrome.storage.local.set({ recordingState: { isRecording: false, isConsolidating: false }, recordLastHeartbeat: 0 }).catch(() => { });
                     chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' });
                     _applyGlobalLock(); // release Lock A so URL-list buttons re-enable
@@ -418,6 +421,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // Recording is genuinely in progress — restore UI to active state
                 _isRecordingActive = true;
+                state.isRecordingActive = true;
                 if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.4'; }
                 if (stopBtn) {
                     stopBtn.disabled = false;
@@ -439,6 +443,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Start local timer ticking from persisted startTime
                 if (rs.startTime) startRecordingTimer(rs.startTime);
                 if (audioOnlyEl) audioOnlyEl.disabled = true;
+                _applyGlobalLock(); // v25.1.2: Refresh Lock A now that backend state is confirmed
                 return;
             }
 
@@ -597,7 +602,7 @@ function _applyGlobalLock() {
     // action buttons still exist in the DOM (state.mergingUrl is null for these cases)
     // and must be explicitly disabled.
     if (_isRecordingActive || _isRemuxing || _isAudioExtracting) {
-        document.querySelectorAll('.native-merge, .direct-download, .quality-tag, .play-btn').forEach(btn => {
+        document.querySelectorAll('.native-merge, .direct-download, .quality-tag').forEach(btn => {
             btn.disabled = true;
             btn.style.opacity = '0.4';
             btn.style.cursor = 'not-allowed';
@@ -712,6 +717,9 @@ function renderUrls() {
             if (videoUrls.length > 0 && audioUrls.length > 0 && !state.mergingUrl && !skipPairing) {
                 const v = videoUrls[0], a = audioUrls.find(au => au.groupTag === v.groupTag) || audioUrls[0];
                 list.appendChild(renderCompanion(v, a, currentTab, state, (v, a) => {
+                    // Lock A check for companion merge callback
+                    if (_isRecordingActive || _isRemuxing || _isAudioExtracting) { _showConflictWarning(); return; }
+                    
                     state.mergingUrl = v.url;
                     ui.updateMergeBanner(2, t('scanning'));
                     renderUrls();
@@ -964,6 +972,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
     }
     if (m.type === 'RECORD_STOPPED') {
         _isRecordingActive = false;
+        state.isRecordingActive = false;
         stopRecordingTimer();
         _prevBitrateReduced = false;
         const statsEl = document.getElementById('record-stats');
@@ -1028,6 +1037,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
     }
     if (m.type === 'RECORD_ERROR') {
         _isRecordingActive = false;
+        state.isRecordingActive = false;
         stopRecordingTimer();
         _prevBitrateReduced = false;
         const statsEl = document.getElementById('record-stats');

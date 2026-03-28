@@ -255,6 +255,7 @@ async function startTest({ streamId, quality, isAudioOnly = false, filename = 'r
     logger.error(`${COMPONENT} ${err.message}`);
     chrome.runtime.sendMessage({ type: 'RECORD_ERROR', error: err.message }).catch(() => { });
     isRunning = false;
+    if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
     worker?.terminate(); worker = null;
     return;
   }
