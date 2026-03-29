@@ -1,5 +1,5 @@
 /**
- * Sovereign Media Sniffer - Main Entry (v25.0.0 Modular)
+ * Sovereign Media Sniffer - Main Entry (v25.2.0 Stabilized)
  */
 import { logger, DEBUG } from '../common/logger.js';
 import {

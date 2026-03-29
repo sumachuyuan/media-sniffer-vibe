@@ -183,7 +183,10 @@ async function dispatchToOffscreen(command) {
         pendingOffscreenCommand = command;
         await createOffscreen();
       } else {
-        chrome.runtime.sendMessage(command).catch(err => logger.error('Command to Offscreen failed', err));
+        chrome.runtime.sendMessage(command).catch(err => {
+          logger.error('Command to Offscreen failed', err);
+          _isFfmpegBusy = false; // Reset on send failure
+        });
       }
     } else {
       pendingOffscreenCommand = command;
@@ -191,6 +194,10 @@ async function dispatchToOffscreen(command) {
     }
   } catch (e) {
     logger.error('dispatchToOffscreen failed', e);
+    // CRITICAL: Reset busy flag if creation or message dispatching fails, 
+    // otherwise the extension stays locked until a manual clear.
+    _isFfmpegBusy = false;
+    _activeOffscreenType = (_activeOffscreenType === 'ffmpeg') ? null : _activeOffscreenType;
   }
 }
 
@@ -273,8 +280,13 @@ export async function createRecordOffscreen() {
       // Stale: type is unknown (SW restart) or the record offscreen is inactive.
       // Stop its capture before force-recreating so Chrome releases the tab
       // capture lock immediately instead of holding it for >250 ms after closeDocument().
-      logger.info('[Orchestrator] Stale record offscreen detected, stopping capture before force-recreating.');
+      logger.info(`[Orchestrator] Cleaning up stale offscreen (type: ${_activeOffscreenType}) before recreation.`);
       chrome.runtime.sendMessage({ type: 'CLEAR_RECORD_STORAGE' }).catch(() => { });
+      
+      // Force reset all flags before attempting to close
+      _activeOffscreenType = null;
+      _isFfmpegBusy = false;
+
       // Give the stale offscreen ~150 ms to stop tracks (actual stop is <10 ms).
       await new Promise(r => setTimeout(r, 150));
       await chrome.offscreen.closeDocument().catch(() => { });

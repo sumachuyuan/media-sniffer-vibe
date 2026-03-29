@@ -1,5 +1,5 @@
 /**
- * Sovereign Popup Main Entry (v25.1.0 Feature Complete)
+ * Sovereign Popup Main Entry (v25.2.0 Resilient)
  */
 import { ui } from './ui.js';
 import { logger } from '../common/logger.js';
@@ -389,13 +389,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     // Phase 6: Reconnect — restore UI if recording was active when popup was closed/reopened.
-    // Self-healing: ask the background whether the record offscreen is actually alive before
-    // trusting the persisted isRecording flag. If the background reports no active recording
-    // but storage still says true (crash / race), reset the stale flag immediately.
-    // Phase 9.8: Pre-warm the record offscreen document as soon as the popup opens.
-    // This eliminates the async delay of creating the document AFTER the user clicks "Start",
-    // which often causes the synchronous tabCapture gesture context to expire in Mv3.
-    chrome.runtime.sendMessage({ type: 'PRE_WARM_RECORD_OFFSCREEN' });
 
     chrome.runtime.sendMessage({ type: 'GET_RECORD_STATUS' }, (resp) => {
         const backendActive = resp?.isRecordActive ?? false;
@@ -622,6 +615,29 @@ function _applyGlobalLock() {
             if (!compMerge.__warnBound) {
                 compMerge.__warnBound = true;
                 compMerge.addEventListener('mousedown', _showConflictWarning);
+            }
+        }
+    } else {
+        // Release: restore all media list buttons when no background task is active
+        document.querySelectorAll('.native-merge, .direct-download, .quality-tag').forEach(btn => {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.title = '';
+            if (btn.__warnBound) {
+                btn.__warnBound = false;
+                btn.removeEventListener('mousedown', _showConflictWarning);
+            }
+        });
+        const compMerge = document.getElementById('compMerge');
+        if (compMerge) {
+            compMerge.disabled = false;
+            compMerge.style.opacity = '1';
+            compMerge.style.cursor = 'pointer';
+            compMerge.title = '';
+            if (compMerge.__warnBound) {
+                compMerge.__warnBound = false;
+                compMerge.removeEventListener('mousedown', _showConflictWarning);
             }
         }
     }
@@ -1185,6 +1201,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
                     state.mergingProgress = 0;
                     ui.hideMergeBanner();
                     _applyGlobalLock(); // release Lock B now that all export flags are cleared
+                    renderUrls(); // RESTORE BUTTONS: Replace "Task Lock" text with original URL action buttons
                     chrome.runtime.sendMessage({ type: 'RESET_GLOBAL_MERGE' }).catch(() => { });
 
                     // Clear record-stats after 8 seconds on success to keep UI clean
@@ -1219,6 +1236,7 @@ function handleRuntimeMessages(m, sender, sendResponse) {
             state.mergingStage = '';
             ui.hideMergeBanner();
             _applyGlobalLock(); // release Lock B now that all export flags are cleared
+            renderUrls(); // Restore buttons manually
         } else {
             resetUI(); // also calls _applyGlobalLock internally
             setTimeout(renderUrls, 2500);
