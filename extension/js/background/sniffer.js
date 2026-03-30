@@ -126,9 +126,11 @@ export function isValidMediaMime(mimeType, url = '') {
   if (mimeLower.startsWith('video/') || mimeLower.startsWith('audio/')) return true;
 
   const manifests = [
-    'application/x-mpegURL',
+    'application/x-mpegurl',
     'application/dash+xml',
-    'application/vnd.apple.mpegurl'
+    'application/vnd.apple.mpegurl',
+    'audio/x-mpegurl',
+    'audio/mpegurl'
   ];
   if (manifests.some(m => mimeLower.includes(m))) return true;
 

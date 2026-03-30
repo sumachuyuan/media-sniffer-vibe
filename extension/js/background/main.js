@@ -361,8 +361,9 @@ chrome.webRequest.onResponseStarted.addListener(
 
     if (isValidMediaMime(contentType, url)) {
       const urlLower = url.toLowerCase();
+      const contentTypeLower = contentType.toLowerCase();
       // Exemption: Manifests and verified media paths/params (like TikTok video streams) skip the size check.
-      const isManifest = urlLower.includes('.m3u8') || urlLower.includes('.mpd') || contentType.includes('mpegurl') || contentType.includes('dash+xml');
+      const isManifest = urlLower.includes('.m3u8') || urlLower.includes('.mpd') || contentTypeLower.includes('mpegurl') || contentTypeLower.includes('dash+xml');
       const isVerified = isVerifiedMedia(urlLower);
 
       // Logic: If it's a direct stream (not a manifest/verified stream), ignore if < 1MB (1048576 bytes) 
