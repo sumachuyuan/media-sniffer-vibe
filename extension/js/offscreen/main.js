@@ -542,11 +542,11 @@ chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
             chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: `后台下载失败: ${chrome.runtime.lastError?.message}` }).catch(() => { });
             return;
           }
-          logger.info(`[Offscreen] Legacy download registered (id=${downloadId}). Cleanup in 5s...`);
+          logger.info(`[Offscreen] Legacy download registered (id=${downloadId}). Cleanup in 3s...`);
           setTimeout(() => {
             URL.revokeObjectURL(url);
             chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLEANUP_REQ' }).catch(() => { });
-          }, 5000);
+          }, 3000);
         });
       } catch (e) {
         logger.error('[Offscreen] OFFSCREEN_TRIGGER_DOWNLOAD failed', e);

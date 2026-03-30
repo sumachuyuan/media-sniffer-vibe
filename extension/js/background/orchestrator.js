@@ -268,8 +268,8 @@ export async function createRecordOffscreen() {
   _isCreating = true;
   try {
     if (await chrome.offscreen.hasDocument()) {
-      if (_activeOffscreenType === 'ffmpeg') {
-        logger.warn('Cannot create record offscreen: FFmpeg merge is already active');
+      if (_activeOffscreenType === 'ffmpeg' && _isFfmpegBusy) {
+        logger.warn('Cannot create record offscreen: FFmpeg merge is actively running');
         return false;
       }
       // If a valid record offscreen is already active, nothing to do.
@@ -317,9 +317,10 @@ export async function adoptExistingOffscreen() {
     if (await chrome.offscreen.hasDocument()) {
       if (!_activeOffscreenType) {
         logger.warn('[Orchestrator] SW restarted: stale offscreen detected. Force-closing for a fresh start.');
+        _activeOffscreenType = null;
+        _isFfmpegBusy = false;
         await chrome.offscreen.closeDocument().catch(() => { });
         isRecordOffscreenActive = false;
-        _isFfmpegBusy = false;
       }
     }
   } catch (err) {
@@ -389,6 +390,12 @@ export async function closeOffscreen(type) {
   if (type && _activeOffscreenType !== type) {
     logger.debug(`[Orchestrator] closeOffscreen ignored: type mismatch (Requested: ${type}, Active: ${_activeOffscreenType})`);
     return;
+  }
+  
+  // If no type is passed, or if we're force-resetting, clear everything first.
+  if (!type) {
+    _activeOffscreenType = null;
+    _isFfmpegBusy = false;
   }
 
   logger.info(`[Orchestrator] closeOffscreen() called. Closing current ${(_activeOffscreenType || 'unknown')} offscreen.`);

@@ -73,11 +73,12 @@ function _triggerBackgroundDownload(req) {
           }
           // Track B succeeded — clear the export marker so popup buttons unlock on next open.
           chrome.storage.local.remove('pendingExportTask').catch(() => {});
-          logger.info(`[Signal] Download registered (id=${downloadId}). Holding offscreen 5s...`);
+          logger.info(`[Signal] Download registered (id=${downloadId}). Holding offscreen 3s...`);
           setTimeout(() => {
-            chrome.runtime.sendMessage({ type: 'REVOKE_BLOB_URL', blobUrl }).catch(() => { });
+            URL.revokeObjectURL(blobUrl);
+            chrome.runtime.sendMessage({ type: 'OFFSCREEN_CLEANUP_REQ' }).catch(() => { });
             closeOffscreen('ffmpeg');
-          }, 5000);
+          }, 3000);
         }
       );
     }
