@@ -76,6 +76,7 @@ let keyframeCount = 0;
 let totalEncodedBytes = 0;
 let totalWrittenBytes = 0; // tracks flushed + queued bytes written to disk
 let audioEncodedCount = 0;
+let audioFrameCount = 0;
 let hasAudio = false;
 
 // Buffer backpressure state
@@ -355,12 +356,24 @@ function handleAudioFrame({ frame }) {
     frame.close();
     return;
   }
+
+  const now = performance.now();
+  if (!startTime) { startTime = now; lastWindowTime = now; }
+
   // Pass the raw AudioData directly — timestamp normalisation happens in
   // handleEncodedAudio (the encoder output callback) via overrideTimestampUs,
   // because EncodedAudioChunk.timestamp is read-only and AudioData.timestamp
   // cannot be changed without copying all PCM data into a new buffer.
   audioEncoder.encode(frame);
   frame.close();
+
+  audioFrameCount++;
+
+  // In audio-only mode, handleFrame is never called, so we must emit stats here.
+  // Audio frames arrive in much smaller buffers (often 10ms-20ms chunks ≈ 50-100 fps)
+  if (encoderMode === 'audio' && (audioFrameCount % 50 === 0)) {
+    emitStats(false);
+  }
 }
 
 // ---------------------------------------------------------------------------

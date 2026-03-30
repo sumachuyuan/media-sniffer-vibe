@@ -8,7 +8,7 @@ import { PLATFORM_RULES } from './platforms.js';
 export const MEDIA_SIGNATURES = [
   '.m3u8', '.mpd', '.mp4', '.webm', 'googlevideo.com', 'videoplayback',
   'chunklist', 'mime=video', 'mime=audio', 'mime_type=video', 'mime_type=audio',
-  '/video/tos/', '.m4a'
+  '/video/tos/', '.m4a', '.mp3', '.wav', '.aac', '.flac', '.opus'
 ];
 
 /**
@@ -132,9 +132,9 @@ export function isValidMediaMime(mimeType, url = '') {
   ];
   if (manifests.some(m => mimeLower.includes(m))) return true;
 
-  // Special case: octet-stream for actual media files (media extension or known API path)
-  if (mimeLower.includes('application/octet-stream')) {
-    const mediaExts = ['.m3u8', '.mpd', '.mp4', '.ts', '.m4s', '.m4a', '.webm', '.mp3', '.wav', '.aac', '.flac'];
+  // Special case: octet-stream or non-standard application types for actual media files
+  if (mimeLower.includes('octet-stream') || mimeLower.includes('application/x-')) {
+    const mediaExts = ['.m3u8', '.mpd', '.mp4', '.ts', '.m4s', '.m4a', '.webm', '.mp3', '.wav', '.aac', '.flac', '.opus', '.m4v'];
     if (mediaExts.some(ext => urlLower.includes(ext))) return true;
     // Feishu/Lark video API paths (no media extension in URL)
     const feishuPaths = [
@@ -154,12 +154,14 @@ export function normalizeUrl(url) {
     const u = new URL(url);
     let changed = false;
 
-    // Universal: strip byte-range params that create duplicate entries for the same stream
-    for (const param of ['bytestart', 'byteend']) {
+    // 1. Universal: strip byte-range params, URL fragments (hashes), and typical cache-busters
+    if (u.hash) { u.hash = ''; changed = true; }
+    const bustParams = ['bytestart', 'byteend', 'range', '_t', 'ts', 'time', 't', '_'];
+    for (const param of bustParams) {
       if (u.searchParams.has(param)) { u.searchParams.delete(param); changed = true; }
     }
 
-    // Platform-specific: strip params declared by the first matching rule
+    // 2. Platform-specific: strip params declared by the first matching rule
     const urlLower = url.toLowerCase();
     for (const rule of PLATFORM_RULES) {
       if (rule.normalizeParams.length > 0 && rule.match(urlLower)) {
@@ -171,7 +173,7 @@ export function normalizeUrl(url) {
     }
 
     if (changed) {
-      const normalized = u.toString();
+      const normalized = u.toString().replace(/\/$/, ""); // Strip trailing slash for consistency
       logger.info(`URL Normalized: ${normalized.substring(0, 100)}...`);
       return normalized;
     }

@@ -32,15 +32,15 @@ adoptExistingOffscreen();
 // When Track A (popup-side write) begins, we start a 2-second polling watchdog.
 // If the popup disappears before EXPORT_SUCCESS arrives, the watchdog fires
 // Track B (SW-side background download) to guarantee file delivery.
-let _exportWatcherId      = null;  // setInterval handle
-let _exportPendingReq     = null;  // saved FFMPEG_COMPLETE request for fallback
+let _exportWatcherId = null;  // setInterval handle
+let _exportPendingReq = null;  // saved FFMPEG_COMPLETE request for fallback
 let _exportPickerOpenedAt = null;  // timestamp when popup opened the Save File Picker
 
 function _stopExportWatchdog() {
   if (_exportWatcherId !== null) {
     clearInterval(_exportWatcherId);
-    _exportWatcherId      = null;
-    _exportPendingReq     = null;
+    _exportWatcherId = null;
+    _exportPendingReq = null;
     _exportPickerOpenedAt = null;
     logger.info('[Watchdog] Export watchdog stopped.');
   }
@@ -72,7 +72,7 @@ function _triggerBackgroundDownload(req) {
             return;
           }
           // Track B succeeded — clear the export marker so popup buttons unlock on next open.
-          chrome.storage.local.remove('pendingExportTask').catch(() => {});
+          chrome.storage.local.remove('pendingExportTask').catch(() => { });
           logger.info(`[Signal] Download registered (id=${downloadId}). Holding offscreen 3s...`);
           setTimeout(() => {
             URL.revokeObjectURL(blobUrl);
@@ -114,24 +114,100 @@ function sanitizeTitle(title) {
   return cleanTitle;
 }
 
-async function addMedia(tabId, url, title, qualities = null, encryption = null, isSegmented = false, estimatedSize = 0) {
+async function addMedia(tabId, rawUrl, title, qualities = null, encryption = null, isSegmented = false, estimatedSize = 0) {
+  const url = normalizeUrl(rawUrl);
+  const urlLower = url.toLowerCase();
+
   if (!state.tabStorage.has(tabId)) state.tabStorage.set(tabId, []);
   let urls = state.tabStorage.get(tabId);
 
-  const existing = urls.find(item => item.url === url);
-  const urlLower = url.toLowerCase();
+  // 1. Generate a "Fingerprint" for robust deduplication.
+  const getFingerprint = (u) => {
+    try {
+      const urlObj = new URL(u);
+      const path = urlObj.pathname.toLowerCase();
+      const mediaExts = ['.mp3', '.mp4', '.wav', '.aac', '.flac', '.opus', '.webm', '.ts', '.m4a', '.m4v'];
+
+      if (mediaExts.some(ext => path.endsWith(ext))) {
+        // For standard extensions, path is enough, ignore all query params.
+        return urlObj.protocol + "//" + urlObj.host + urlObj.pathname.toLowerCase();
+      }
+
+      // For extension-less URLs, aggressively strip known dynamic noise params.
+      urlObj.hash = '';
+      const noiseParams = ['token', 'sign', 'sig', 'signature', 'timestamp', 'expire', 'expires', '_t', 'ts', 'time', 't', '_', 'auth', 'key', 'nonce', 'uuid', 'req_id', 'session_id', 'l', 'qs', 'btag'];
+      for (const p of noiseParams) {
+        urlObj.searchParams.delete(p);
+      }
+      return urlObj.toString().toLowerCase();
+    } catch (e) { }
+    return u.toLowerCase();
+  };
+  const fingerprint = getFingerprint(url);
+
+  // 1.5. Generate a "Path Fingerprint" to catch CDN/Redirect domain shifts.
+  const getPathFingerprint = (u) => {
+    try {
+      const urlObj = new URL(u);
+      urlObj.hash = '';
+      const noiseParams = ['token', 'sign', 'sig', 'signature', 'timestamp', 'expire', 'expires', '_t', 'ts', 'time', 't', '_', 'auth', 'key', 'nonce', 'uuid', 'req_id', 'session_id', 'l', 'qs', 'btag'];
+      for (const p of noiseParams) {
+        urlObj.searchParams.delete(p);
+      }
+      const pathAndSearch = urlObj.pathname.toLowerCase() + urlObj.search.toLowerCase();
+      return pathAndSearch.length > 8 ? pathAndSearch : u.toLowerCase();
+    } catch (e) { }
+    return u.toLowerCase();
+  };
+  const pathFingerprint = getPathFingerprint(url);
+
+  // 2. Check for duplicates using raw normalized URL, Fingerprint, and Exact File Size
+  const urlObjForCheck = new URL(url);
+  const existing = urls.find(item => {
+    const itemLower = item.url.toLowerCase();
+
+    // Exact URL match or Fingerprint match
+    if (itemLower === urlLower) return true;
+    if (getFingerprint(itemLower) === fingerprint) return true;
+
+    // Cross-Domain CDN/Redirect match
+    if (getPathFingerprint(itemLower) === pathFingerprint) return true;
+
+    // Size-based deduplication: If exact same host and exact same positive file size (>10KB), it's the same media.
+    if (estimatedSize > 10240 && item.estimatedSize === estimatedSize) {
+      try {
+        const itemObj = new URL(item.url);
+        if (itemObj.host === urlObjForCheck.host) {
+          return true;
+        }
+      } catch (e) { }
+    }
+
+    return false;
+  });
+
   if (!isSegmented && (urlLower.includes('.m3u8') || urlLower.includes('.mpd') || urlLower.includes('chunklist'))) {
     isSegmented = true;
   }
 
   if (existing) {
     let updated = false;
+    // Keep the most informative qualities/encryption
     if (!existing.qualities && qualities) { existing.qualities = qualities; updated = true; }
     if (!existing.encryption && encryption) { existing.encryption = encryption; updated = true; }
     if (!existing.isSegmented && isSegmented) { existing.isSegmented = isSegmented; updated = true; }
     if (estimatedSize > 0 && (!existing.estimatedSize || existing.estimatedSize === 0)) {
       existing.estimatedSize = estimatedSize;
       updated = true;
+    }
+    // Optimization: if current title is better (e.g. from DOM scanning), update it
+    const newTabTitle = sanitizeTitle(title);
+    if (newTabTitle && newTabTitle !== 'Unknown' && (!existing.tabTitle || existing.tabTitle === 'Unknown' || newTabTitle.length > existing.tabTitle.length)) {
+      existing.tabTitle = newTabTitle;
+    }
+    if (updated) {
+      const uniqueUrls = new Set(urls.map(u => u.url.toLowerCase()));
+      chrome.action.setBadgeText({ tabId, text: uniqueUrls.size.toString() }).catch(() => { });
     }
     return;
   }
@@ -151,17 +227,37 @@ async function addMedia(tabId, url, title, qualities = null, encryption = null, 
     estimatedSize
   });
 
-  if (urls.length > 50) urls.shift();
-  chrome.action.setBadgeText({ tabId, text: urls.length.toString() }).catch(() => { });
+  if (urls.length > 200) urls.shift(); // Increased from 50 to 200 to handle SPA scrolling smoothly
+
+  // Calculate unique count directly from the array to ensure badge-list consistency
+  const uniqueUrls = new Set(urls.map(u => u.url.toLowerCase()));
+  const badgeText = uniqueUrls.size > 0 ? uniqueUrls.size.toString() : '';
+
+  chrome.action.setBadgeText({ tabId, text: badgeText }).catch(() => { });
   chrome.action.setBadgeBackgroundColor({ tabId, color: '#FFD700' }).catch(() => { });
 }
 
 // --- Network Listener ---
 chrome.webRequest.onBeforeRequest.addListener(
   async (details) => {
-    const { tabId } = details;
-    let { url } = details;
-    if (tabId === -1) return;
+    let { tabId, url } = details;
+    // Crucial Fix: Service Worker requests (like TikTok video fetch) have tabId === -1
+    // We map them to the currently active tab just like Cat-Catch does.
+    if (tabId === -1) {
+      if (state.activeTabId) tabId = state.activeTabId;
+      else {
+        // Cold start fallback: Service worker just woke up, activeTabId not yet populated
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tabs && tabs[0]) {
+            state.activeTabId = tabs[0].id;
+            tabId = tabs[0].id;
+          } else {
+            return;
+          }
+        } catch (e) { return; }
+      }
+    }
 
     url = normalizeUrl(url);
     const urlLower = url.toLowerCase();
@@ -197,6 +293,9 @@ chrome.webRequest.onBeforeRequest.addListener(
       }
 
       chrome.tabs.sendMessage(tabId, { type: 'GET_PURE_TITLE', url: url }, (response) => {
+        // Always ensure the lock is cleared, even if there's an error
+        setTimeout(() => state.processingUrls.delete(url), 2000); // Keep lock for 2s to be safe
+
         if (chrome.runtime.lastError) {
           chrome.tabs.get(tabId, (tab) => {
             if (!chrome.runtime.lastError && tab) addMedia(tabId, url, tab.title, qualities, encryption, isSegmented, estimatedSize);
@@ -212,7 +311,6 @@ chrome.webRequest.onBeforeRequest.addListener(
           });
         }
       });
-      state.processingUrls.delete(url);
     }
   },
   { urls: ["<all_urls>"] }
@@ -221,9 +319,25 @@ chrome.webRequest.onBeforeRequest.addListener(
 // --- Universal MIME Sniffer (Tier 2 Fallback) ---
 chrome.webRequest.onResponseStarted.addListener(
   async (details) => {
-    const { tabId, responseHeaders, type } = details;
-    let { url } = details;
-    if (tabId === -1 || state.processingUrls.has(url)) return;
+    const { responseHeaders, type } = details;
+    let { tabId, url } = details;
+
+    if (tabId === -1) {
+      if (state.activeTabId) tabId = state.activeTabId;
+      else {
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tabs && tabs[0]) {
+            state.activeTabId = tabs[0].id;
+            tabId = tabs[0].id;
+          } else {
+            return;
+          }
+        } catch (e) { return; }
+      }
+    }
+
+    if (state.processingUrls.has(url)) return;
 
     url = normalizeUrl(url);
     if (state.processingUrls.has(url)) return;
@@ -253,10 +367,12 @@ chrome.webRequest.onResponseStarted.addListener(
 
       // Logic: If it's a direct stream (not a manifest/verified stream), ignore if < 1MB (1048576 bytes) 
       // This is a universal way to filter out JSON/Telemetry blobs that might use octet-stream.
-      if (!isManifest && !isVerified && contentLength > 0 && contentLength < 1048576) return;
+      if (!isManifest && !isVerified && contentLength > 0 && contentLength < 102400) return;
 
       state.processingUrls.add(url);
       chrome.tabs.sendMessage(tabId, { type: 'GET_PURE_TITLE', url: url }, (response) => {
+        setTimeout(() => state.processingUrls.delete(url), 2000); // Always release the lock
+
         if (chrome.runtime.lastError) {
           chrome.tabs.get(tabId, (tab) => {
             if (!chrome.runtime.lastError && tab) addMedia(tabId, url, tab.title, null, null, isManifest, contentLength || 0);
@@ -274,17 +390,23 @@ chrome.webRequest.onResponseStarted.addListener(
           });
         }
       });
-      state.processingUrls.delete(url);
     }
   },
   { urls: ["<all_urls>"] },
   ["responseHeaders"]
 );
 
-// --- Tab Lifecycle ---
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') cleanTab(tabId);
+// --- Tab Lifecycle (Cat-Catch pattern) ---
+chrome.webNavigation.onCommitted.addListener((details) => {
+  // Only clear tab data on genuine main-frame navigations, ignoring subframes and pushState/SPA routing
+  if (details.frameId === 0 && !details.transitionQualifiers?.includes('client_redirect')) {
+    const isFullReload = ['reload', 'link', 'typed', 'generated', 'auto_bookmark'].includes(details.transitionType);
+    if (isFullReload) {
+      cleanTab(details.tabId);
+    }
+  }
 });
+
 chrome.tabs.onRemoved.addListener(cleanTab);
 
 // --- Message Central ---
@@ -293,10 +415,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const { type } = request;
 
     if (type === 'MEDIA_DETECTED') {
-      const { url, title, isManualExtract } = request;
+      const { url, title } = request;
       const tabId = sender.tab ? sender.tab.id : -1;
-      const senderUrl = sender.tab ? sender.tab.url : '';
-      if (tabId !== -1 && url && isManualExtract && senderUrl.includes('tiktok.com')) {
+
+      // Critical fix: Also apply the processing lock to DOM-based detections
+      if (tabId !== -1 && url && !state.processingUrls.has(url)) {
         addMedia(tabId, url, title || (sender.tab ? sender.tab.title : null));
       }
     }
@@ -349,10 +472,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Reject any new FFmpeg/download task if one is already in progress.
     // Prevents concurrent writes, queue-jumping, and IDB data corruption.
     if (state.globalMergeStatus.isMerging &&
-        (type === 'START_FFMPEG_MERGE' ||
-         type === 'START_DIRECT_DOWNLOAD' ||
-         type === 'START_WEBM_REMUX'    ||
-         type === 'START_AUDIO_EXTRACT')) {
+      (type === 'START_FFMPEG_MERGE' ||
+        type === 'START_DIRECT_DOWNLOAD' ||
+        type === 'START_WEBM_REMUX' ||
+        type === 'START_AUDIO_EXTRACT')) {
       logger.warn(`[SW] ${type} rejected — task already in progress (isMerging=true).`);
       sendResponse({ error: 'BUSY' });
       return;
@@ -640,7 +763,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               const _watchdogContexts = await chrome.runtime.getContexts({ contextTypes: ['POPUP'] });
               if (_watchdogContexts.length === 0) {
                 logger.warn('[Watchdog] Popup closed during write! Switching to SW background download.');
-                const pendingReq     = _exportPendingReq;
+                const pendingReq = _exportPendingReq;
                 const pickerOpenedAt = _exportPickerOpenedAt;
                 _stopExportWatchdog(); // clears all state
                 if (!pendingReq) return;
@@ -687,7 +810,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Popup successfully completed writable.close() — stop watchdog and release lock.
       logger.info('[Signal] EXPORT_SUCCESS received. Disk write confirmed. Stopping watchdog and closing offscreen.');
       _stopExportWatchdog();
-      chrome.storage.local.remove('pendingExportTask').catch(() => {}); // belt-and-suspenders cleanup
+      chrome.storage.local.remove('pendingExportTask').catch(() => { }); // belt-and-suspenders cleanup
       state.globalMergeStatus.isMerging = false;
       closeOffscreen('ffmpeg');
       sendResponse({ ok: true });

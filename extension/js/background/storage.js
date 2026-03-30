@@ -19,7 +19,8 @@ export const state = {
     isRecording: false,
     isConsolidating: false,
     isReady: false
-  }
+  },
+  activeTabId: null
 };
 
 const PARSE_CACHE_TTL = 30000;

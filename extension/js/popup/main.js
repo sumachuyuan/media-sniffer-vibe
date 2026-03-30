@@ -734,7 +734,7 @@ function renderUrls() {
                 list.appendChild(renderCompanion(v, a, currentTab, state, (v, a) => {
                     // Lock A check for companion merge callback
                     if (_isRecordingActive || _isRemuxing || _isAudioExtracting) { _showConflictWarning(); return; }
-                    
+
                     state.mergingUrl = v.url;
                     ui.updateMergeBanner(2, t('scanning'));
                     renderUrls();
