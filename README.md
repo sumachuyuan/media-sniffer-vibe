@@ -33,7 +33,7 @@
 -   **高能模式 (High Performance)**: 🚀 按钮开启 3-5 线程并发抓取，下载提速 300%+。
 -   **内存脱水 (Memory Sovereignty)**: 智能回收 `MEMFS` 临时文件，确保任务结束即刻释放系统资源。
 -   **隐私合规**: 权限逻辑已进行“权限脱水”审计，不读取任何无关数据。
--   **多语言支持**: 支持中/英双语，一键切换。
+-   **视频旋转**: 内联预览播放器支持 90° 旋转，解决部分网页视频倒置问题。支持全屏预览。\n-   **页面翻转**: YouTube/Bilibili 页面一键注入旋转浮层，直接旋转页面播放器。\n-   **多语言支持**: 支持中/英双语，一键切换。
 
 ---
 
@@ -51,6 +51,10 @@
 2.  **CMD 指令 (CMD)**:
     *   **适用场景**: YouTube、Bilibili 或需要外部处理（如 4K/8K）的场景。
     *   **操作**: 点击将 `yt-dlp` 指令复制到剪贴板。
+	3.  **旋转视频 (Rotate)**:
+	    *   **弹窗内预览**: 点击"播放"展开内联预览，使用 ↺/↻/⟲ 旋转视频，⛶ 全屏播放。
+	    *   **YouTube/Bilibili**: 点击"翻转视频"，页面出现旋转浮层直接旋转播放器。
+
 
 ---
 
@@ -108,7 +112,7 @@
 -   **High Performance**: 🚀 button enables 3-5 concurrent threads for 300%+ faster downloads.
 -   **Memory Sovereignty**: Proactive `MEMFS` cleanup ensures system resources are released immediately after tasks.
 -   **Privacy Dehydration**: Audited permission logic ensuring zero data collection.
--   **Multilingual**: Support for English and Chinese with one-click toggling.
+-   **Video Rotation**: Built-in 90° rotation in the inline preview player to fix upside-down videos. Fullscreen preview supported.\n-   **Page Rotation Overlay**: One-click inject a floating rotation bar on YouTube/Bilibili to rotate the native player directly.\n-   **Multilingual**: Support for English and Chinese with one-click toggling.
 
 ---
 
@@ -126,6 +130,10 @@ Click the icon to open the popup and see the resource list:
 2.  **CMD**:
     *   **Best for**: YouTube/Bilibili or scenarios requiring high-quality external processing (e.g., 4K/8K).
     *   **Action**: Copy the `yt-dlp` command to your clipboard.
+
+3.  **Rotate Video**:
+    *   **Inline Preview**: Click "Play" to expand the inline preview, use ↺/↻/⟲ to rotate, ⛶ for fullscreen.
+    *   **YouTube/Bilibili**: Click "翻转视频" to inject a floating rotation bar directly on the page player.
 
 ---
 
@@ -163,4 +171,4 @@ To use the **CMD** mode for high-quality downloads, you need to install `yt-dlp`
 This tool is for educational and research purposes only. Please respect content copyrights. 
 本工具仅供学习与研究使用。请尊重内容版权。
 
-*2026-03-25 | Media Sniffer Vibe Dev Team*
+*2026-06-16 | Media Sniffer Vibe Dev Team*
