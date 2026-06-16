@@ -129,6 +129,7 @@ export function renderPromo(platformName, currentTab, ua) {
         </div>
         <div class="promo-desc">${t('promoDesc')}</div>
         <button id="copyMajorBtn" class="gold-btn" title="${t('copyCmdTooltip')}">${t('copyCmd')}</button>
+        <button id="rotationModeBtn" class="outline-btn" title="翻转页面视频（再次点击关闭）">🔄 翻转视频</button>
     `;
     div.querySelector('#copyMajorBtn').onclick = () => {
         const isYT = currentTab.url.includes('youtube.com') || currentTab.url.includes('googlevideo.com');

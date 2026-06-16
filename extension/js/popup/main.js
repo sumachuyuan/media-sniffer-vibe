@@ -710,6 +710,22 @@ function renderUrls() {
             const isUniversalSupported = platformName !== t('platformPageUrl') && !hostname.includes('douyin') && !hostname.includes('tiktok');
             if (isUniversalSupported) {
                 list.appendChild(renderPromo(platformName, currentTab, state.ua));
+                // Rotation overlay toggle for YouTube/Bilibili
+                const rotationModeBtn = document.getElementById('rotationModeBtn');
+                if (rotationModeBtn) {
+                    rotationModeBtn.onclick = () => {
+                        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                            if (!tabs[0]?.id) return;
+                            chrome.scripting.executeScript({
+                                target: { tabId: tabs[0].id },
+                                files: ['js/content/rotation_overlay.js'],
+                                world: 'MAIN'
+                            }).catch((err) => {
+                                logger.error('rotation_overlay', 'inject failed', err);
+                            });
+                        });
+                    };
+                }
             }
 
             if (!response?.urls?.length) {
