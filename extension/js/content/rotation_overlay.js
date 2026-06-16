@@ -239,8 +239,14 @@
   createOverlay(!!video);
   window[FLAG_KEY] = true;
 
-  // Default rotation: immediately rotate 90° right on first inject
+  // Default rotation: animate to 180° on first inject
+  // Double rAF ensures browser paints initial 0° state before applying rotation,
+  // so the CSS transition (0.3s ease) animates consistently.
   if (video) {
-    rotateRight();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        apply(180);
+      });
+    });
   }
 })();
