@@ -31,7 +31,8 @@
     #player-container {
       position: relative;
       width: 90%;
-      height: 80vh;
+      max-height: 80vh;
+      aspect-ratio: 16 / 9;
       background: #000;
       border: 1px solid var(--gold-dark);
       border-radius: 12px;
@@ -40,12 +41,16 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: aspect-ratio 0.3s ease;
     }
 
     video {
       width: 100%;
       height: 100%;
       outline: none;
+      transform-origin: center center;
+      transition: transform 0.3s ease;
+      object-fit: contain;
     }
 
     #info-bar {
@@ -123,6 +128,61 @@
       transform: translateY(0);
     }
 
+    .rotation-group {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .rotation-btn {
+      background: transparent;
+      color: var(--gold);
+      border: 1px solid var(--gold-dark);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      width: 40px;
+      height: 36px;
+      line-height: 1;
+    }
+
+    .rotation-btn:hover {
+      background: rgba(255, 215, 0, 0.15);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 215, 0, 0.2);
+    }
+
+    .rotation-btn:active {
+      transform: translateY(0);
+    }
+
+    .rotation-btn.reset {
+      font-size: 12px;
+      width: 36px;
+    }
+
+    .rotation-btn.reset.disabled {
+      opacity: 0.3;
+      cursor: default;
+      pointer-events: none;
+      border-color: rgba(184, 134, 11, 0.3);
+    }
+
+    .angle-display {
+      font-size: 11px;
+      color: rgba(255,215,0,0.6);
+      text-align: center;
+      min-width: 28px;
+      user-select: none;
+    }
+
     #error-msg {
       display: none;
       color: #ff4444;
@@ -140,9 +200,15 @@
   </div>
 
   <div id="info-bar">
-    <div style="display: flex; flex-direction: column; max-width: 60%;">
+    <div class="title-status-group" style="display: flex; flex-direction: column; min-width: 0; flex: 1;">
       <div class="title" id="video-title" style="max-width: 100%;">Loading Stream...</div>
       <div class="status" id="video-status">Detecting Format</div>
+    </div>
+    <div class="rotation-group" id="rotation-group">
+      <button class="rotation-btn" id="rotate-left" title="左旋 90°">↺</button>
+      <span class="angle-display" id="angle-display">0°</span>
+      <button class="rotation-btn" id="rotate-right" title="右旋 90°">↻</button>
+      <button class="rotation-btn reset disabled" id="reset-rotation" title="重置">⟲</button>
     </div>
     <button id="snapshot-btn" class="snapshot-btn">
       拍照

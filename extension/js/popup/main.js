@@ -860,13 +860,14 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
                     <span class="rot-btn rot-reset" title="重置" style="cursor:pointer; color:#666; font-size:11px; padding:2px 6px; border-radius:4px;">⟲</span>
                 </div>
             ` : ''}
+            <span class="preview-fullscreen" title="全屏" style="cursor:pointer; color:#aaa; font-size:15px; padding:2px 6px; border-radius:4px;">⛶</span>
             <div class="preview-close">${t('close')}</div>
         </div>
         <video controls autoplay class="preview-video" style="width:100%; max-height:240px; background:#000; display:block; transform-origin:center center; transition:transform 0.3s ease;"></video>
     `;
 
     // Add hover effects via JS for simplicity in this dynamic injection
-    container.querySelectorAll('.preview-snapshot, .preview-close, .rot-btn').forEach(el => {
+    container.querySelectorAll('.preview-snapshot, .preview-close, .rot-btn, .preview-fullscreen').forEach(el => {
         el.onmouseover = () => el.style.opacity = '1';
         el.onmouseout = () => el.style.opacity = '0.8';
     });
@@ -906,6 +907,15 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
         currentRotation = 0;
         applyRotation();
     };
+
+    // Fullscreen: open preview.html in new tab
+    const fullscreenBtn = container.querySelector('.preview-fullscreen');
+    if (fullscreenBtn) {
+        fullscreenBtn.onclick = () => {
+            const params = new URLSearchParams({ url, title, mediaType });
+            window.open(`preview.html?${params.toString()}`, '_blank');
+        };
+    }
 
     // Snapshot
     if (snapshotBtn) {

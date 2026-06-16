@@ -87,13 +87,55 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = 'PLAYBACK FAILED';
     }
 
+    // --- Rotation Functionality ---
+    const container = document.getElementById('player-container');
+    const rotateLeftBtn = document.getElementById('rotate-left');
+    const rotateRightBtn = document.getElementById('rotate-right');
+    const resetRotationBtn = document.getElementById('reset-rotation');
+    const angleDisplay = document.getElementById('angle-display');
+    const rotationGroup = document.getElementById('rotation-group');
+
+    let currentRotation = 0;
+
+    function applyRotation() {
+        video.style.transform = `rotate(${currentRotation}deg)`;
+        if (currentRotation === 90 || currentRotation === 270) {
+            container.style.aspectRatio = '9 / 16';
+        } else {
+            container.style.aspectRatio = '16 / 9';
+        }
+        angleDisplay.textContent = currentRotation + '°';
+        if (currentRotation === 0) {
+            resetRotationBtn.classList.add('disabled');
+        } else {
+            resetRotationBtn.classList.remove('disabled');
+        }
+    }
+
+    rotateLeftBtn.addEventListener('click', () => {
+        currentRotation = (currentRotation - 90 + 360) % 360;
+        applyRotation();
+    });
+
+    rotateRightBtn.addEventListener('click', () => {
+        currentRotation = (currentRotation + 90) % 360;
+        applyRotation();
+    });
+
+    resetRotationBtn.addEventListener('click', () => {
+        if (currentRotation === 0) return;
+        currentRotation = 0;
+        applyRotation();
+    });
+
     // --- Snapshot Functionality ---
     const snapshotBtn = document.getElementById('snapshot-btn');
-    
-    // Hide snapshot for audio
+
+    // Hide snapshot and rotation for audio
     const mediaType = params.get('mediaType');
     if (mediaType === 'audio') {
         snapshotBtn.style.display = 'none';
+        rotationGroup.style.display = 'none';
     }
 
     snapshotBtn.addEventListener('click', takeSnapshot);
