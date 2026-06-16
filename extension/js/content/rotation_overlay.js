@@ -6,24 +6,54 @@
  */
 (function () {
   const OVERLAY_ID = 'ms-rotation-overlay';
+  const STYLE_ID = 'ms-rotation-styles';
   const FLAG_KEY = '__msRotationActive';
+
+  // ── Shared teardown: clean up everything and restore page state ──
+  function teardown() {
+    // 1. Restore video original CSS properties
+    if (window.__msRotationVideo) {
+      window.__msRotationVideo.style.transform = window.__msRotationSavedTransform || '';
+      window.__msRotationVideo.style.transformOrigin = window.__msRotationSavedTransformOrigin || '';
+      window.__msRotationVideo.style.transition = window.__msRotationSavedTransition || '';
+      window.__msRotationVideo = null;
+      window.__msRotationSavedTransform = undefined;
+      window.__msRotationSavedTransformOrigin = undefined;
+      window.__msRotationSavedTransition = undefined;
+    }
+
+    // 2. Remove any active drag listeners on document
+    if (_dragOnMove) {
+      document.removeEventListener('mousemove', _dragOnMove);
+      _dragOnMove = null;
+    }
+    if (_dragOnUp) {
+      document.removeEventListener('mouseup', _dragOnUp);
+      _dragOnUp = null;
+    }
+
+    // 3. Remove overlay DOM element
+    const existing = document.getElementById(OVERLAY_ID);
+    if (existing) existing.remove();
+
+    // 4. Remove style element
+    const styleEl = document.getElementById(STYLE_ID);
+    if (styleEl) styleEl.remove();
+
+    // 5. Reset flag
+    window[FLAG_KEY] = false;
+  }
 
   // ── Toggle: remove if already active ──
   if (window[FLAG_KEY]) {
-    const existing = document.getElementById(OVERLAY_ID);
-    if (existing) existing.remove();
-    if (window.__msRotationVideo) {
-      window.__msRotationVideo.style.transform = '';
-      window.__msRotationVideo = null;
-    }
-    window[FLAG_KEY] = false;
+    teardown();
     return;
   }
 
   // ── Inject stylesheet once ──
-  if (!document.getElementById('ms-rotation-styles')) {
+  if (!document.getElementById(STYLE_ID)) {
     const style = document.createElement('style');
-    style.id = 'ms-rotation-styles';
+    style.id = STYLE_ID;
     style.textContent = `
       #${OVERLAY_ID} {
         position: fixed; bottom: 24px; right: 24px; z-index: 99999;
@@ -48,10 +78,26 @@
       #${OVERLAY_ID} .ms-rot-btn:hover {
         background: rgba(255,215,0,0.2); border-color: #FFD700;
       }
+      #${OVERLAY_ID} .ms-rot-btn:disabled {
+        opacity: 0.3; pointer-events: none;
+        border-color: rgba(184,134,11,0.2);
+      }
       #${OVERLAY_ID} .ms-rot-reset { font-size: 12px; width: 32px; }
       #${OVERLAY_ID} .ms-rot-reset.disabled {
         opacity: 0.3; pointer-events: none;
         border-color: rgba(184,134,11,0.2);
+      }
+      #${OVERLAY_ID} .ms-rot-close {
+        background: transparent; color: rgba(255,255,255,0.5);
+        border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+        width: 28px; height: 28px;
+        font-size: 14px; cursor: pointer; display: flex;
+        align-items: center; justify-content: center;
+        line-height: 1; padding: 0; margin-left: 4px;
+      }
+      #${OVERLAY_ID} .ms-rot-close:hover {
+        color: #fff; border-color: rgba(255,255,255,0.4);
+        background: rgba(255,255,255,0.1);
       }
       #${OVERLAY_ID} .ms-angle {
         color: rgba(255,215,0,0.7); font-size: 11px; font-weight: 700;
@@ -87,21 +133,25 @@
   }
 
   const video = findLargestVideo();
-  if (!video) {
-    window[FLAG_KEY] = true;
-    createOverlay(null);
-    return;
+
+  // ── Save original video CSS properties BEFORE modifying ──
+  if (video) {
+    window.__msRotationSavedTransform = video.style.transform;
+    window.__msRotationSavedTransformOrigin = video.style.transformOrigin;
+    window.__msRotationSavedTransition = video.style.transition;
+
+    video.style.transformOrigin = 'center center';
+    video.style.transition = 'transform 0.3s ease';
+    window.__msRotationVideo = video;
   }
 
-  // ── Setup video transform ──
-  video.style.transformOrigin = 'center center';
-  video.style.transition = 'transform 0.3s ease';
-  window.__msRotationVideo = video;
-
   let angle = 0;
-  let updateDisplay = () => {};
+  let _dragOnMove = null;
+  let _dragOnUp = null;
+  let updateDisplay = () => { };
 
   function apply(deg) {
+    if (!video) return;
     angle = deg;
     video.style.transform = angle === 0 ? '' : `rotate(${angle}deg)`;
     updateDisplay();
@@ -112,26 +162,32 @@
   function reset()       { apply(0); }
 
   // ── Floating overlay UI (DOM API only, no innerHTML) ──
-  function createOverlay(_video) {
+  function createOverlay(hasVideo) {
     const container = el('div', null, { id: OVERLAY_ID });
 
     const leftBtn = el('button', 'ms-rot-btn', { id: 'ms-rot-left', title: '左旋90°' }, '↺');
     const angleEl = el('span', 'ms-angle', { id: 'ms-angle' }, '0°');
     const rightBtn = el('button', 'ms-rot-btn', { id: 'ms-rot-right', title: '右旋90°' }, '↻');
     const resetBtn = el('button', 'ms-rot-btn ms-rot-reset disabled', { id: 'ms-rot-reset', title: '重置' }, '⟲');
+    const closeBtn = el('button', 'ms-rot-close', { id: 'ms-rot-close', title: '关闭翻转' }, '✕');
 
     container.appendChild(leftBtn);
     container.appendChild(angleEl);
     container.appendChild(rightBtn);
     container.appendChild(resetBtn);
+    container.appendChild(closeBtn);
 
-    if (!_video) {
+    if (!hasVideo) {
       container.appendChild(el('span', 'ms-hint', null, '未检测到视频'));
+      // Disable all rotation buttons when no video
+      leftBtn.disabled = true;
+      rightBtn.disabled = true;
+      resetBtn.disabled = true;
     }
 
     document.body.appendChild(container);
 
-    updateDisplay = function() {
+    updateDisplay = function () {
       angleEl.textContent = angle + '°';
       if (angle === 0) {
         resetBtn.classList.add('disabled');
@@ -143,31 +199,48 @@
     leftBtn.addEventListener('click', rotateLeft);
     rightBtn.addEventListener('click', rotateRight);
     resetBtn.addEventListener('click', reset);
+    closeBtn.addEventListener('click', teardown);
 
-    // ── Drag support ──
-    let dragging = false, startX, startY, startLeft, startTop;
-    container.addEventListener('mousedown', function(e) {
+    // ── Drag support (listeners added on mousedown, removed on mouseup) ──
+
+    container.addEventListener('mousedown', function (e) {
       if (e.target.tagName === 'BUTTON') return;
-      dragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
+
       const rect = container.getBoundingClientRect();
-      startLeft = rect.left;
-      startTop = rect.top;
+      const startLeft = rect.left;
+      const startTop = rect.top;
+      const startX = e.clientX;
+      const startY = e.clientY;
+
+      // Switch from right/bottom to left/top positioning for drag
       container.style.right = 'auto';
       container.style.bottom = 'auto';
       container.style.left = startLeft + 'px';
       container.style.top = startTop + 'px';
       e.preventDefault();
+
+      _dragOnMove = function (e) {
+        container.style.left = (startLeft + e.clientX - startX) + 'px';
+        container.style.top = (startTop + e.clientY - startY) + 'px';
+      };
+
+      _dragOnUp = function () {
+        document.removeEventListener('mousemove', _dragOnMove);
+        document.removeEventListener('mouseup', _dragOnUp);
+        _dragOnMove = null;
+        _dragOnUp = null;
+      };
+
+      document.addEventListener('mousemove', _dragOnMove);
+      document.addEventListener('mouseup', _dragOnUp, { once: true });
     });
-    document.addEventListener('mousemove', function(e) {
-      if (!dragging) return;
-      container.style.left = (startLeft + e.clientX - startX) + 'px';
-      container.style.top = (startTop + e.clientY - startY) + 'px';
-    });
-    document.addEventListener('mouseup', function() { dragging = false; });
   }
 
-  createOverlay(video);
+  createOverlay(!!video);
   window[FLAG_KEY] = true;
+
+  // Default rotation: immediately rotate 90° right on first inject
+  if (video) {
+    rotateRight();
+  }
 })();
