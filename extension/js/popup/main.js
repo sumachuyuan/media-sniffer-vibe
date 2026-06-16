@@ -850,15 +850,23 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
     // 3. Setup new
     container.style.display = 'block';
     container.innerHTML = `
-        <div class="preview-header" style="display:flex; justify-content:flex-end; padding:8px 12px; gap:12px; border-bottom:1px solid rgba(255,255,255,0.05); align-items:center;">
-            ${!isAudio ? `<div class="preview-snapshot">${t('snapshot')}</div>` : ''}
+        <div class="preview-header" style="display:flex; justify-content:flex-end; padding:8px 12px; gap:8px; border-bottom:1px solid rgba(255,255,255,0.05); align-items:center;">
+            ${!isAudio ? `
+                <div class="preview-snapshot">${t('snapshot')}</div>
+                <div class="preview-rotation" style="display:flex; gap:4px; align-items:center;">
+                    <span class="rot-btn rot-left" title="左旋90°" style="cursor:pointer; color:#aaa; font-size:14px; padding:2px 6px; border-radius:4px;">↺</span>
+                    <span class="rot-angle" style="color:#888; font-size:10px; min-width:22px; text-align:center;">0°</span>
+                    <span class="rot-btn rot-right" title="右旋90°" style="cursor:pointer; color:#aaa; font-size:14px; padding:2px 6px; border-radius:4px;">↻</span>
+                    <span class="rot-btn rot-reset" title="重置" style="cursor:pointer; color:#666; font-size:11px; padding:2px 6px; border-radius:4px;">⟲</span>
+                </div>
+            ` : ''}
             <div class="preview-close">${t('close')}</div>
         </div>
-        <video controls autoplay class="preview-video" style="width:100%; max-height:240px; background:#000; display:block;"></video>
+        <video controls autoplay class="preview-video" style="width:100%; max-height:240px; background:#000; display:block; transform-origin:center center; transition:transform 0.3s ease;"></video>
     `;
 
     // Add hover effects via JS for simplicity in this dynamic injection
-    container.querySelectorAll('.preview-snapshot, .preview-close').forEach(el => {
+    container.querySelectorAll('.preview-snapshot, .preview-close, .rot-btn').forEach(el => {
         el.onmouseover = () => el.style.opacity = '1';
         el.onmouseout = () => el.style.opacity = '0.8';
     });
@@ -872,6 +880,34 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
     const video = container.querySelector('video');
     const snapshotBtn = container.querySelector('.preview-snapshot');
 
+    // Rotation
+    const rotLeft = container.querySelector('.rot-left');
+    const rotRight = container.querySelector('.rot-right');
+    const rotReset = container.querySelector('.rot-reset');
+    const rotAngle = container.querySelector('.rot-angle');
+
+    let currentRotation = 0;
+
+    function applyRotation() {
+        video.style.transform = currentRotation === 0 ? '' : `rotate(${currentRotation}deg)`;
+        if (rotAngle) rotAngle.textContent = currentRotation + '°';
+        if (rotReset) rotReset.style.opacity = currentRotation === 0 ? '0.4' : '0.8';
+    }
+
+    if (rotLeft) rotLeft.onclick = () => {
+        currentRotation = (currentRotation - 90 + 360) % 360;
+        applyRotation();
+    };
+    if (rotRight) rotRight.onclick = () => {
+        currentRotation = (currentRotation + 90) % 360;
+        applyRotation();
+    };
+    if (rotReset) rotReset.onclick = () => {
+        currentRotation = 0;
+        applyRotation();
+    };
+
+    // Snapshot
     if (snapshotBtn) {
         snapshotBtn.onclick = () => {
             if (!video.videoWidth) {
