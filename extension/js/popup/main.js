@@ -928,8 +928,11 @@ function startEmbeddedPreview(url, uid, title = 'Snapshot', mediaType = 'unknown
     const fullscreenBtn = container.querySelector('.preview-fullscreen');
     if (fullscreenBtn) {
         fullscreenBtn.onclick = () => {
-            const params = new URLSearchParams({ url, title, mediaType });
-            window.open(`preview.html?${params.toString()}`, '_blank');
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                const referer = tabs[0]?.url || '';
+                const params = new URLSearchParams({ url, title, mediaType, referer });
+                window.open(`preview.html?${params.toString()}`, '_blank');
+            });
         };
     }
 

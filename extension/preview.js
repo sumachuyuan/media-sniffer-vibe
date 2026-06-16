@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mediaUrl = params.get('url');
     const title = params.get('title') || 'Untitled Stream';
     const autoSnapshot = params.get('autoSnapshot') === '1';
+    const referer = params.get('referer') || '';
 
     if (!mediaUrl) {
         statusEl.textContent = 'ERROR: No URL provided';
@@ -17,13 +18,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     titleEl.textContent = title;
 
-    // 根据后缀或内容特征判断格式
-    if (mediaUrl.includes('.m3u8')) {
-        loadHLS(mediaUrl);
-    } else if (mediaUrl.includes('.mpd')) {
-        loadDASH(mediaUrl);
+    // 注入 DNR Referer 规则以穿越广告 CDN 鉴权
+    function loadMedia() {
+        if (mediaUrl.includes('.m3u8')) {
+            loadHLS(mediaUrl);
+        } else if (mediaUrl.includes('.mpd')) {
+            loadDASH(mediaUrl);
+        } else {
+            loadDirect(mediaUrl);
+        }
+    }
+
+    if (referer && chrome?.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({
+            type: 'UPDATE_DNR_FOR_PREVIEW',
+            referer: referer,
+            ua: navigator.userAgent,
+            url: mediaUrl
+        }, () => loadMedia());
     } else {
-        loadDirect(mediaUrl);
+        loadMedia();
     }
 
     if (autoSnapshot) {
@@ -127,6 +141,18 @@ document.addEventListener('DOMContentLoaded', () => {
         currentRotation = 0;
         applyRotation();
     });
+
+    // --- Close button ---
+    const closeBtn = document.getElementById('close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            window.close();
+            // If close() is blocked (not opened by script), page will still be visible
+            setTimeout(() => {
+                document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#FFD700;font-family:sans-serif;font-size:18px;">请手动关闭此标签页 (Ctrl+W / ⌘+W)</div>';
+            }, 500);
+        });
+    }
 
     // --- Snapshot Functionality ---
     const snapshotBtn = document.getElementById('snapshot-btn');
