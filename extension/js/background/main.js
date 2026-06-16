@@ -545,8 +545,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (type === 'UPDATE_DNR_FOR_PREVIEW') {
       updateDnrRulesForFetch(request.referer, request.ua, request.url).then(() => {
         sendResponse({ status: 'applied' });
-        // Safety net: auto-clear after 5 min in case page unload cleanup fails
-        setTimeout(clearDnrRules, 5 * 60 * 1000);
+        // Safety net: auto-clear after 2h in case page unload cleanup fails
+        setTimeout(clearDnrRules, 2 * 60 * 60 * 1000);
       });
     }
 
