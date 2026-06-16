@@ -29,6 +29,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // 页面关闭时主动清除 DNR 规则
+    window.addEventListener('beforeunload', () => {
+        chrome.runtime.sendMessage({ type: 'CLEAR_DNR_RULES' }).catch(() => {});
+    });
+
     if (referer && chrome?.runtime?.sendMessage) {
         chrome.runtime.sendMessage({
             type: 'UPDATE_DNR_FOR_PREVIEW',
