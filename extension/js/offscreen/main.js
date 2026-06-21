@@ -89,12 +89,12 @@ async function handleMerge(m) {
 
     // Attempt merging with '-c copy'. 
     // Note: MP4 container might fail for VP9+Opus. If it fails, we try MKV as a robust fallback.
-    let result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-c', 'copy', 'final.mp4']);
+    let result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-map', '0:v', '-map', '1:a', '-c', 'copy', 'final.mp4']);
     let finalExt = 'mp4';
 
     if (result !== 0) {
       logger.warn('MP4 merge failed, attempting MKV fallback for codec compatibility...');
-      result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-c', 'copy', 'final.mkv']);
+      result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-map', '0:v', '-map', '1:a', '-c', 'copy', 'final.mkv']);
       finalExt = 'mkv';
     }
 
