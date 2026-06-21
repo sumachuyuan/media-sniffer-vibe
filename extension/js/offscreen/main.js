@@ -249,12 +249,12 @@ async function handleMergeSegments(m) {
       const mergedBuffer = new Uint8Array(await mergedBlob.arrayBuffer());
       ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
 
-      finalArgs = ['-y', '-i', 'merged.mp4', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
+      finalArgs = ['-y', '-i', 'merged.mp4', '-map', '0', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
     } else {
       let concatList = "";
       for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
       ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
-      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
+      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
     }
 
     sendProgress(95, progressUrl, t('merging'), itemId);
