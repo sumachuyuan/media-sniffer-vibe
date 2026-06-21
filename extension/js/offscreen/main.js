@@ -254,7 +254,7 @@ async function handleMergeSegments(m) {
       let concatList = "";
       for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
       ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
-      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
+      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
     }
 
     sendProgress(95, progressUrl, t('merging'), itemId);
