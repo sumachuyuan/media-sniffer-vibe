@@ -249,7 +249,7 @@ async function handleMergeSegments(m) {
       const mergedBuffer = new Uint8Array(await mergedBlob.arrayBuffer());
       ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
 
-      finalArgs = ['-y', '-i', 'merged.mp4', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
+      finalArgs = ['-y', '-i', 'merged.mp4', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
     } else {
       let concatList = "";
       for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
