@@ -301,8 +301,11 @@ async function handleMergeSegments(m) {
     chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: `${outputName}.mp4`, url: progressUrl, itemId }).catch(() => { });
   } catch (e) {
     if (e.message !== 'CANCELLED') {
-      logger.error('Segment Merge FATAL Error', e);
-      chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: e.message, url: progressUrl, itemId }).catch(() => { });
+      const detail = e instanceof DOMException
+        ? `DOMException: ${e.name} — ${e.message}`
+        : (e.message || String(e));
+      logger.error('Segment Merge FATAL Error', detail);
+      chrome.runtime.sendMessage({ type: 'FFMPEG_ERROR', error: detail, url: progressUrl, itemId }).catch(() => { });
     }
   } finally {
     _stopHeartbeat();
