@@ -66,7 +66,7 @@ export async function runFFmpeg(ffmpeg, args) {
 
 const WORK_FILE_PATTERNS = [
     /^part_\d+\.ts$/,
-    /^(iv|ia|init|final|merged)\.(mp4|mkv)$/,
+    /^(iv|ia|init|final|merged)\.(mp4|mkv|ts)$/,
     /^concat\.txt$/,
     /^input\.webm$/,          // WebM remux: input
     /^output\.mp4$/,          // WebM remux: output
