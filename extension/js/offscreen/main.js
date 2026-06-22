@@ -283,9 +283,10 @@ async function handleMergeSegments(m) {
       const result = await runFFmpeg(ffmpeg, batchArgs);
       if (result !== 0) throw new Error(`FFMPEG_EXEC_ERROR: Batch ${batchNum} merge failed.`);
 
-      // Read batch output into JS, cleanup MEMFS
+      // Read batch output into JS, then delete from MEMFS
       const batchOut = ffmpeg.FS('readFile', `batch_${batchNum}.ts`);
       batchOutputs.push(batchOut);
+      try { ffmpeg.FS('unlink', `batch_${batchNum}.ts`); } catch (e) {}
 
       // Clean MEMFS for next batch
       cleanupFS(ffmpeg);
