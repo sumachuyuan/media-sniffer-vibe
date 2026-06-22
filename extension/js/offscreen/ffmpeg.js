@@ -59,7 +59,10 @@ export async function runFFmpeg(ffmpeg, args) {
         await ffmpeg.run(...cleanArgs);
         return 0;
     } catch (e) {
-        logger.error('Execution Failed', e);
+        const detail = (e && typeof e === 'object')
+          ? `${e.name || 'Error'}: ${e.message || '(no message)'} | type=${e.type || '?'}`
+          : String(e);
+        logger.error(`Execution Failed: ${detail}`);
         return -1;
     }
 }
