@@ -52,10 +52,12 @@ export async function updateDnrRulesForFetch(referer, ua, urlFilter = '*', scope
     } catch (e) { /* keep original filter */ }
   }
 
-  // When the filter is relatively broad, restrict to extension-initiated requests only
-  // (offscreen document fetch calls) so user's normal browsing is never affected.
+  // Ponytail: when scopeToExtension, set urlFilter='*' so Referer/UA headers cover
+  // ALL CDN domains, not just the M3U8 host. initiatorDomains already guarantees
+  // user browsing is unaffected — only extension fetch() calls get modified.
   if (scopeToExtension) {
     condition.initiatorDomains = [chrome.runtime.id];
+    condition.urlFilter = '*';
   }
 
   const rule = { id: ruleId, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [{ header: 'Referer', operation: 'set', value: referer }, { header: 'User-Agent', operation: 'set', value: ua }] }, condition };
