@@ -188,11 +188,22 @@ async function handleMergeSegments(m) {
           logger.info(`Worker ${workerId} segment ${index} retrying in ${delay}ms...`);
           await sleep(delay);
         }
-        if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
+        // Ponytail: CDN sometimes returns JSON error responses for specific segments
+        // (e.g. {"success":false}). Detect and skip these — losing 5/2822 segments is
+        // better than failing the entire 2-hour download.
+        const isJsonError = buf.length < 200 && new TextDecoder().decode(buf.slice(0, 1)) === '{';
 
-        // Ponytail: store in JS array, not MEMFS. Prevents WASM heap OOM with 2000+ segments.
-        segmentBuffers[index] = buf;
-        buf = null; // Memory hygiene
+        if (isJsonError) {
+          logger.warn(`Worker ${workerId} segment ${index} skipped: CDN returned JSON error (${buf.length} bytes)`);
+          segmentBuffers[index] = null; // mark as skipped
+          buf = null;
+        } else {
+          if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
+
+          // Ponytail: store in JS array, not MEMFS. Prevents WASM heap OOM with 2000+ segments.
+          segmentBuffers[index] = buf;
+          buf = null; // Memory hygiene
+        }
 
         completed++;
         if (completed % 20 === 0 || completed === total) {
@@ -233,8 +244,17 @@ async function handleMergeSegments(m) {
     }
 
     if (isCancelled) throw new Error('CANCELLED');
-    if (failedSegments.length > 0) {
-      throw new Error(`Critical failure: ${failedSegments.length} segments could not be fetched after retries.`);
+
+    // Count skipped segments (CDN JSON errors) — these are non-fatal
+    const skippedCount = segmentBuffers.filter(b => b === null).length;
+    if (skippedCount > 0) {
+      logger.warn(`${skippedCount} segments skipped due to CDN errors (will cause brief glitch at those points)`);
+    }
+
+    // Only real failures (segments that couldn't be fetched after retries) are fatal
+    const realFailures = failedSegments.filter(idx => segmentBuffers[idx] === undefined);
+    if (realFailures.length > 0) {
+      throw new Error(`Critical failure: ${realFailures.length} segments could not be fetched after retries.`);
     }
 
     logger.info('All segments fetched, concatenating in JS memory...');
