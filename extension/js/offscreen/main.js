@@ -130,8 +130,6 @@ async function handleMergeSegments(m) {
 
   let aesKey = null;
   let ffmpeg = null;
-  const segmentBuffers = new Array(total); // JS-side storage, one writeFile to MEMFS later
-  let _totalBytes = 0;
   _startHeartbeat('handleMergeSegments');
   try {
     ffmpeg = await initFFmpeg(true);
@@ -188,9 +186,8 @@ async function handleMergeSegments(m) {
           await sleep(delay);
         }
         // Ponytail: detect CDN JSON error responses and skip
-        const isJsonError = buf.length < 200 && new TextDecoder().decode(buf.slice(0, 1)) === '{';
-        if (isJsonError) {
-          logger.warn(`Worker ${workerId} segment ${index} skipped: CDN JSON error (${buf.length} bytes)`);
+        if (buf.length < 200 && new TextDecoder().decode(buf.slice(0, 1)) === '{') {
+          logger.warn(`Worker ${workerId} segment ${index} skipped: JSON error (${buf.length} bytes)`);
           buf = null;
           completed++;
           return;
@@ -198,9 +195,7 @@ async function handleMergeSegments(m) {
 
         if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
 
-        // Ponytail: store in JS, one writeFile to MEMFS after all downloads
-        segmentBuffers[index] = buf;
-        _totalBytes += buf.byteLength;
+        ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
         buf = null; // Memory hygiene
 
         completed++;
@@ -242,75 +237,37 @@ async function handleMergeSegments(m) {
     }
 
     if (isCancelled) throw new Error('CANCELLED');
-    // Ponytail: failed segments after retries are skipped, not fatal
+    // Ponytail: skip failed segments, don't abort entire download
     if (failedSegments.length > 0) {
-      logger.warn(`${failedSegments.length} segments could not be fetched after retries — skipping`);
+      logger.warn(`${failedSegments.length} segments failed after retries — skipping`);
     }
 
-    // Ponytail: batch concat to avoid both WASM OOM (2822 MEMFS files) and
-    // Blob NotReadableError (2800+ parts). Process in batches of 500, then
-    // concat the batch outputs.
-    const BATCH_SIZE = 500;
-    const batchOutputs = []; // Uint8Array of each batch's merged output
+    logger.info('All segments fetched and written to FS');
 
-    logger.info(`All segments fetched (${_totalBytes} bytes), batch-merging (${Math.ceil(total / BATCH_SIZE)} batches)...`);
-
-    for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, total);
-      const batchNum = Math.floor(batchStart / BATCH_SIZE);
-
-      // Write this batch's segments to MEMFS
-      for (let i = batchStart; i < batchEnd; i++) {
-        const seg = segmentBuffers[i];
-        if (seg) {
-          ffmpeg.FS('writeFile', `part_${i}.ts`, seg);
-          segmentBuffers[i] = null; // free JS ref
-        }
+    let finalArgs;
+    if (mapUrl) {
+      logger.info('Executing binary concat for fMP4 segments...');
+      const parts = [ffmpeg.FS('readFile', 'init.mp4')];
+      for (let i = 0; i < total; i++) {
+        parts.push(ffmpeg.FS('readFile', `part_${i}.ts`));
+        try { ffmpeg.FS('unlink', `part_${i}.ts`); } catch (e) { } // Free memory
       }
+      try { ffmpeg.FS('unlink', 'init.mp4'); } catch (e) { }
 
-      // Build concat list for this batch
-      let concatList = '';
-      for (let i = batchStart; i < batchEnd; i++) {
-        try { ffmpeg.FS('readFile', `part_${i}.ts`); concatList += `file 'part_${i}.ts'\n`; } catch (e) {}
-      }
+      const mergedBlob = new Blob(parts);
+      const mergedBuffer = new Uint8Array(await mergedBlob.arrayBuffer());
+      ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
 
-      if (!concatList) continue; // all segments in batch were skipped
-
+      finalArgs = ['-y', '-i', 'merged.mp4', '-map', '0', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
+    } else {
+      let concatList = "";
+      for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
       ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
-      const batchArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', '-f', 'mpegts', `batch_${batchNum}.ts`];
-
-      logger.info(`Batch ${batchNum}: ${batchStart}-${batchEnd}, merging...`);
-      const result = await runFFmpeg(ffmpeg, batchArgs);
-      if (result !== 0) throw new Error(`FFMPEG_EXEC_ERROR: Batch ${batchNum} merge failed.`);
-
-      // Read batch output into JS, then delete from MEMFS
-      const batchOut = ffmpeg.FS('readFile', `batch_${batchNum}.ts`);
-      batchOutputs.push(batchOut);
-      try { ffmpeg.FS('unlink', `batch_${batchNum}.ts`); } catch (e) {}
-
-      // Clean MEMFS for next batch
-      cleanupFS(ffmpeg);
+      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
     }
-
-    logger.info(`Batch merge complete: ${batchOutputs.length} batches produced`);
-
-    // Write all batch outputs to MEMFS for final merge
-    for (let i = 0; i < batchOutputs.length; i++) {
-      ffmpeg.FS('writeFile', `batch_${i}.ts`, batchOutputs[i]);
-      batchOutputs[i] = null; // free JS ref
-    }
-
-    // Final concat
-    let concatList = '';
-    for (let i = 0; i < batchOutputs.length; i++) {
-      concatList += `file 'batch_${i}.ts'\n`;
-    }
-    ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
-
-    let finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
 
     sendProgress(95, progressUrl, t('merging'), itemId);
-    logger.info(`Writing ${_totalBytes} bytes as single file to MEMFS, FFmpeg starting...`);
+    logger.info(`FFmpeg starting with args: ${finalArgs.join(' ')}`);
 
     const result = await runFFmpeg(ffmpeg, finalArgs);
     if (result !== 0) throw new Error('FFMPEG_EXEC_ERROR: Segment merge failed.');
