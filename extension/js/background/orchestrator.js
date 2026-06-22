@@ -34,27 +34,39 @@ export function getIsCapturing() {
   return isCapturing;
 }
 
-// Ponytail: urlFilter always '*' with initiatorDomains scoped to extension.
-// This covers ALL CDN/cross-origin domains (M3U8 host, segment CDN, key server)
-// without ever affecting user browsing. The old per-domain scoping was fragile —
-// HLS streams routinely split playlists and segments across different domains.
-export async function updateDnrRulesForFetch(referer, ua, _urlFilter, _scopeToExtension) {
+export async function updateDnrRulesForFetch(referer, ua, urlFilter = '*', scopeToExtension = false) {
   const ruleId = 1001;
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   const ruleIdsToRemove = rules.map(r => r.id).filter(id => id === ruleId);
 
   const condition = {
-    urlFilter: '*',
-    resourceTypes: ['xmlhttprequest', 'other', 'main_frame', 'sub_frame', 'media'],
-    initiatorDomains: [chrome.runtime.id],
+    urlFilter,
+    resourceTypes: ['xmlhttprequest', 'other', 'main_frame', 'sub_frame', 'media']
   };
+
+  // Optimization: If a specific URL is provided, try to scope the filter to its origin
+  if (urlFilter && urlFilter !== '*') {
+    try {
+      const u = new URL(urlFilter);
+      condition.urlFilter = `${u.protocol}//${u.host}/*`;
+    } catch (e) { /* keep original filter */ }
+  }
+
+  // Ponytail: when scopeToExtension, widen urlFilter to '*' so Referer/UA
+  // covers ALL CDN domains (not just the M3U8 host). initiatorDomains keeps
+  // user browsing safe. scopeToExtension=false leaves urlFilter host-scoped
+  // because chrome.downloads. download() needs the rule without initiatorDomains.
+  if (scopeToExtension) {
+    condition.initiatorDomains = [chrome.runtime.id];
+    condition.urlFilter = '*';
+  }
 
   const rule = { id: ruleId, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [{ header: 'Referer', operation: 'set', value: referer }, { header: 'User-Agent', operation: 'set', value: ua }] }, condition };
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: ruleIdsToRemove,
     addRules: [rule]
   });
-  logger.info('DNR Rules updated [extension-scoped]', { referer });
+  logger.info(`DNR Rules updated for: ${condition.urlFilter}${scopeToExtension ? ' [extension-scoped]' : ''}`, { referer });
 }
 
 export async function clearDnrRules() {
