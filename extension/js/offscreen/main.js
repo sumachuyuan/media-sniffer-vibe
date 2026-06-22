@@ -263,12 +263,19 @@ async function handleMergeSegments(m) {
 
     let finalArgs;
     if (mapUrl) {
-      // fMP4: prepend init to concatenated segments, write single file to MEMFS
+      // fMP4: manually concatenate Uint8Arrays to avoid Blob NotReadableError
       const parts = [initBuffer];
       for (let i = 0; i < total; i++) {
         if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
       }
-      const mergedBuffer = new Uint8Array(await new Blob(parts).arrayBuffer());
+      let totalBytes = 0;
+      for (const p of parts) totalBytes += p.byteLength;
+      const mergedBuffer = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const p of parts) {
+        mergedBuffer.set(p, offset);
+        offset += p.byteLength;
+      }
       ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
       // Free JS references
       initBuffer = null;
@@ -276,14 +283,22 @@ async function handleMergeSegments(m) {
 
       finalArgs = ['-y', '-i', 'merged.mp4', '-map', '0', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
     } else {
-      // TS: concatenate all segments, write as single .ts to MEMFS
+      // TS: manually concatenate Uint8Arrays to avoid Blob NotReadableError
       const parts = [];
       for (let i = 0; i < total; i++) {
         if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
       }
-      const mergedBuffer = new Uint8Array(await new Blob(parts).arrayBuffer());
+      let totalBytes = 0;
+      for (const p of parts) totalBytes += p.byteLength;
+      const mergedBuffer = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const p of parts) {
+        mergedBuffer.set(p, offset);
+        offset += p.byteLength;
+      }
       ffmpeg.FS('writeFile', 'merged.ts', mergedBuffer);
       // Free JS references
+      
       for (let i = 0; i < total; i++) segmentBuffers[i] = null;
 
       finalArgs = ['-y', '-fflags', '+genpts+igndts', '-i', 'merged.ts', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
