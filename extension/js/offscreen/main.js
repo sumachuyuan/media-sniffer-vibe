@@ -251,10 +251,12 @@ async function handleMergeSegments(m) {
       logger.warn(`${skippedCount} segments skipped due to CDN errors (will cause brief glitch at those points)`);
     }
 
-    // Only real failures (segments that couldn't be fetched after retries) are fatal
-    const realFailures = failedSegments.filter(idx => segmentBuffers[idx] === undefined);
-    if (realFailures.length > 0) {
-      throw new Error(`Critical failure: ${realFailures.length} segments could not be fetched after retries.`);
+    // Ponytail: segments that fail after all retries are skipped, not fatal.
+    // Losing a few segments out of thousands causes a brief glitch but the user
+    // gets the file. Throwing here would waste the entire download.
+    const unfilledCount = failedSegments.filter(idx => segmentBuffers[idx] === undefined).length;
+    if (unfilledCount > 0) {
+      logger.warn(`${unfilledCount} segments could not be fetched after retries — skipping (brief glitch at these points)`);
     }
 
     logger.info('All segments fetched, concatenating in JS memory...');
