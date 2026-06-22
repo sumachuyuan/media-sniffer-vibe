@@ -16,6 +16,8 @@ export async function decryptBuffer(data, key, ivStr, seq) {
         const decrypted = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: iv }, cryptoKey, data);
         return new Uint8Array(decrypted);
     } catch (e) {
-        throw new Error('DECRYPT_FAILED: ' + e.message);
+        const sizeMod16 = data.byteLength % 16;
+        const firstBytes = Array.from(new Uint8Array(data.slice(0, 8))).map(b => b.toString(16).padStart(2, '0')).join('');
+        throw new Error(`DECRYPT_FAILED: ${e.name || 'Error'}: ${e.message || '(no message)'} | size=${data.byteLength} (mod16=${sizeMod16}) first8=${firstBytes.substring(0,16)}`);
     }
 }
