@@ -529,18 +529,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (type === 'START_DIRECT_DOWNLOAD') {
-      const isSensitive = PLATFORM_RULES.some(r => r.proxyRequired && r.match(request.url.toLowerCase()));
-      // Ponytail: URLs with auth query params need proxy download because
-      // chrome.downloads.download() doesn't send page cookies/Referer headers.
-      const hasAuthParams = /[?&](?:key|auth_key|time|token|sign)=/i.test(request.url);
+      // Ponytail: always use proxy download via offscreen fetch. chrome.downloads
+      // doesn't send page cookies/Referer, so CDN auth params cause failures.
+      // Proxy download injects Referer via DNR, matching the page's own requests.
       updateDnrRulesForFetch(request.referer, request.ua, request.url).then(() => {
-        if (isSensitive || hasAuthParams) {
-          handleProxyDownload({ ...request, outputName: request.filename });
-        } else {
-          chrome.downloads.download({ url: request.url, filename: `${request.filename}.mp4`, saveAs: true }, () => {
-            setTimeout(clearDnrRules, 5000);
-          });
-        }
+        handleProxyDownload({ ...request, outputName: request.filename });
         sendResponse({ status: 'started' });
       });
     }
