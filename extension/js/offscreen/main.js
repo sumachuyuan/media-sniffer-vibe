@@ -87,7 +87,7 @@ async function handleMerge(m) {
     if (isCancelled) throw new Error('CANCELLED');
     sendProgress(70, progressUrl, t('merging'), itemId);
 
-    // Attempt merging with '-c copy'.
+    // Attempt merging with '-c copy'. 
     // Note: MP4 container might fail for VP9+Opus. If it fails, we try MKV as a robust fallback.
     let result = await runFFmpeg(ffmpeg, ['-y', '-nostdin', '-i', 'iv.mp4', '-i', 'ia.mp4', '-map', '0:v', '-map', '1:a', '-c', 'copy', 'final.mp4']);
     let finalExt = 'mp4';
@@ -130,7 +130,6 @@ async function handleMergeSegments(m) {
 
   let aesKey = null;
   let ffmpeg = null;
-  const segmentBuffers = new Array(total); // JS-side segment storage, stream to MEMFS later
   _startHeartbeat('handleMergeSegments');
   try {
     ffmpeg = await initFFmpeg(true);
@@ -153,7 +152,6 @@ async function handleMergeSegments(m) {
     let currentIndex = 0;
     const failedSegments = [];
     let completed = 0;
-    let skippedCount = 0;
 
     const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
     const MAX_ATTEMPTS = 3;
@@ -187,12 +185,10 @@ async function handleMergeSegments(m) {
           logger.info(`Worker ${workerId} segment ${index} retrying in ${delay}ms...`);
           await sleep(delay);
         }
-
-        // Ponytail: detect CDN JSON error responses and skip them
+        // Ponytail: detect CDN JSON error responses and skip
         const isJsonError = buf.length < 200 && new TextDecoder().decode(buf.slice(0, 1)) === '{';
         if (isJsonError) {
-          logger.warn(`Worker ${workerId} segment ${index} skipped: CDN returned JSON error (${buf.length} bytes)`);
-          skippedCount++;
+          logger.warn(`Worker ${workerId} segment ${index} skipped: CDN JSON error (${buf.length} bytes)`);
           buf = null;
           completed++;
           return;
@@ -200,9 +196,7 @@ async function handleMergeSegments(m) {
 
         if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
 
-        // Ponytail: store in JS array, stream-write to MEMFS after all downloads.
-        // Avoids WASM heap OOM from 2822 individual MEMFS files.
-        segmentBuffers[index] = buf;
+        ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
         buf = null; // Memory hygiene
 
         completed++;
@@ -244,44 +238,33 @@ async function handleMergeSegments(m) {
     }
 
     if (isCancelled) throw new Error('CANCELLED');
-
-    if (skippedCount > 0) {
-      logger.warn(`${skippedCount} segments skipped (CDN errors) — brief glitch at those points`);
-    }
-
-    // Ponytail: segments that still fail after retries are skipped, not fatal
+    // Ponytail: failed segments after retries are skipped, not fatal
     if (failedSegments.length > 0) {
       logger.warn(`${failedSegments.length} segments could not be fetched after retries — skipping`);
     }
 
-    logger.info('All segments fetched, starting FFmpeg merge...');
-    logger.info('All segments fetched, stream-writing to MEMFS...');
+    logger.info('All segments fetched and written to FS');
 
-    // Ponytail: stream-write segments to a single MEMFS file to avoid both
-    // ArrayBuffer OOM (280MB JS allocation) and MEMFS OOM (2822 individual files).
-    // FS.open('w') + sequential FS.write() auto-advances position.
     let finalArgs;
     if (mapUrl) {
-      const fd = ffmpeg.FS('open', 'merged.mp4', 'w');
-      try {
-        const initData = ffmpeg.FS('readFile', 'init.mp4');
-        ffmpeg.FS('write', fd, initData, 0, initData.byteLength);
-      } catch (e) { /* init not in MEMFS, skip */ }
+      logger.info('Executing binary concat for fMP4 segments...');
+      const parts = [ffmpeg.FS('readFile', 'init.mp4')];
       for (let i = 0; i < total; i++) {
-        const seg = segmentBuffers[i];
-        if (seg) { ffmpeg.FS('write', fd, seg, 0, seg.byteLength); segmentBuffers[i] = null; }
+        parts.push(ffmpeg.FS('readFile', `part_${i}.ts`));
+        try { ffmpeg.FS('unlink', `part_${i}.ts`); } catch (e) { } // Free memory
       }
-      ffmpeg.FS('close', fd);
       try { ffmpeg.FS('unlink', 'init.mp4'); } catch (e) { }
+
+      const mergedBlob = new Blob(parts);
+      const mergedBuffer = new Uint8Array(await mergedBlob.arrayBuffer());
+      ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
+
       finalArgs = ['-y', '-i', 'merged.mp4', '-map', '0', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
     } else {
-      const fd = ffmpeg.FS('open', 'merged.ts', 'w');
-      for (let i = 0; i < total; i++) {
-        const seg = segmentBuffers[i];
-        if (seg) { ffmpeg.FS('write', fd, seg, 0, seg.byteLength); segmentBuffers[i] = null; }
-      }
-      ffmpeg.FS('close', fd);
-      finalArgs = ['-y', '-fflags', '+genpts+igndts', '-i', 'merged.ts', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
+      let concatList = "";
+      for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
+      ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
+      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
     }
 
     sendProgress(95, progressUrl, t('merging'), itemId);
