@@ -130,6 +130,9 @@ async function handleMergeSegments(m) {
 
   let aesKey = null;
   let ffmpeg = null;
+  let initBuffer = null;
+  // Ponytail: store segments in JS array, not MEMFS. Prevents WASM heap OOM.
+  const segmentBuffers = new Array(total);
   _startHeartbeat('handleMergeSegments');
   try {
     ffmpeg = await initFFmpeg(true);
@@ -143,7 +146,7 @@ async function handleMergeSegments(m) {
     if (mapUrl) {
       logger.info(`Fetching initialization map: ${mapUrl}`);
       const r = await fetch(mapUrl);
-      ffmpeg.FS('writeFile', 'init.mp4', new Uint8Array(await r.arrayBuffer()));
+      initBuffer = new Uint8Array(await r.arrayBuffer());
     }
 
     logger.info(`Starting fetch of ${total} segments with concurrency=${concurrency}...`);
@@ -187,7 +190,8 @@ async function handleMergeSegments(m) {
         }
         if (aesKey) buf = await decryptBuffer(buf, aesKey, encryption.iv, (encryption.mediaSequence || 0) + index);
 
-        ffmpeg.FS('writeFile', `part_${index}.ts`, buf);
+        // Ponytail: store in JS array, not MEMFS. Prevents WASM heap OOM with 2000+ segments.
+        segmentBuffers[index] = buf;
         buf = null; // Memory hygiene
 
         completed++;
@@ -233,28 +237,34 @@ async function handleMergeSegments(m) {
       throw new Error(`Critical failure: ${failedSegments.length} segments could not be fetched after retries.`);
     }
 
-    logger.info('All segments fetched and written to FS');
+    logger.info('All segments fetched, concatenating in JS memory...');
 
     let finalArgs;
     if (mapUrl) {
-      logger.info('Executing binary concat for fMP4 segments...');
-      const parts = [ffmpeg.FS('readFile', 'init.mp4')];
+      // fMP4: prepend init to concatenated segments, write single file to MEMFS
+      const parts = [initBuffer];
       for (let i = 0; i < total; i++) {
-        parts.push(ffmpeg.FS('readFile', `part_${i}.ts`));
-        try { ffmpeg.FS('unlink', `part_${i}.ts`); } catch (e) { } // Free memory
+        if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
       }
-      try { ffmpeg.FS('unlink', 'init.mp4'); } catch (e) { }
-
-      const mergedBlob = new Blob(parts);
-      const mergedBuffer = new Uint8Array(await mergedBlob.arrayBuffer());
+      const mergedBuffer = new Uint8Array(await new Blob(parts).arrayBuffer());
       ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
+      // Free JS references
+      initBuffer = null;
+      for (let i = 0; i < total; i++) segmentBuffers[i] = null;
 
       finalArgs = ['-y', '-i', 'merged.mp4', '-map', '0', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
     } else {
-      let concatList = "";
-      for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
-      ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
-      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
+      // TS: concatenate all segments, write as single .ts to MEMFS
+      const parts = [];
+      for (let i = 0; i < total; i++) {
+        if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
+      }
+      const mergedBuffer = new Uint8Array(await new Blob(parts).arrayBuffer());
+      ffmpeg.FS('writeFile', 'merged.ts', mergedBuffer);
+      // Free JS references
+      for (let i = 0; i < total; i++) segmentBuffers[i] = null;
+
+      finalArgs = ['-y', '-fflags', '+genpts+igndts', '-i', 'merged.ts', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
     }
 
     sendProgress(95, progressUrl, t('merging'), itemId);
