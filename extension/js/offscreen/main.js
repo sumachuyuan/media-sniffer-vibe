@@ -247,30 +247,66 @@ async function handleMergeSegments(m) {
       logger.warn(`${failedSegments.length} segments could not be fetched after retries — skipping`);
     }
 
-    logger.info(`All segments fetched (${_totalBytes} bytes), writing single file to MEMFS...`);
+    // Ponytail: batch concat to avoid both WASM OOM (2822 MEMFS files) and
+    // Blob NotReadableError (2800+ parts). Process in batches of 500, then
+    // concat the batch outputs.
+    const BATCH_SIZE = 500;
+    const batchOutputs = []; // Uint8Array of each batch's merged output
 
-    let finalArgs;
-    if (mapUrl) {
-      // fMP4: binary concat init + valid segments in JS, write one file to MEMFS
-      const parts = [];
-      try { parts.push(ffmpeg.FS('readFile', 'init.mp4')); } catch (e) {}
-      for (let i = 0; i < total; i++) {
-        if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
+    logger.info(`All segments fetched (${_totalBytes} bytes), batch-merging (${Math.ceil(total / BATCH_SIZE)} batches)...`);
+
+    for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, total);
+      const batchNum = Math.floor(batchStart / BATCH_SIZE);
+
+      // Write this batch's segments to MEMFS
+      for (let i = batchStart; i < batchEnd; i++) {
+        const seg = segmentBuffers[i];
+        if (seg) {
+          ffmpeg.FS('writeFile', `part_${i}.ts`, seg);
+          segmentBuffers[i] = null; // free JS ref
+        }
       }
-      try { ffmpeg.FS('unlink', 'init.mp4'); } catch (e) {}
-      const buf = new Uint8Array(await new Blob(parts).arrayBuffer());
-      ffmpeg.FS('writeFile', 'merged.mp4', buf);
-      finalArgs = ['-y', '-i', 'merged.mp4', '-map', '0', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
-    } else {
-      // TS: concat valid segments in JS, write one merged.ts to MEMFS
-      const parts = [];
-      for (let i = 0; i < total; i++) {
-        if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
+
+      // Build concat list for this batch
+      let concatList = '';
+      for (let i = batchStart; i < batchEnd; i++) {
+        try { ffmpeg.FS('readFile', `part_${i}.ts`); concatList += `file 'part_${i}.ts'\n`; } catch (e) {}
       }
-      const buf = new Uint8Array(await new Blob(parts).arrayBuffer());
-      ffmpeg.FS('writeFile', 'merged.ts', buf);
-      finalArgs = ['-y', '-fflags', '+genpts+igndts', '-i', 'merged.ts', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
+
+      if (!concatList) continue; // all segments in batch were skipped
+
+      ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
+      const batchArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', '-f', 'mpegts', `batch_${batchNum}.ts`];
+
+      logger.info(`Batch ${batchNum}: ${batchStart}-${batchEnd}, merging...`);
+      const result = await runFFmpeg(ffmpeg, batchArgs);
+      if (result !== 0) throw new Error(`FFMPEG_EXEC_ERROR: Batch ${batchNum} merge failed.`);
+
+      // Read batch output into JS, cleanup MEMFS
+      const batchOut = ffmpeg.FS('readFile', `batch_${batchNum}.ts`);
+      batchOutputs.push(batchOut);
+
+      // Clean MEMFS for next batch
+      cleanupFS(ffmpeg);
     }
+
+    logger.info(`Batch merge complete: ${batchOutputs.length} batches produced`);
+
+    // Write all batch outputs to MEMFS for final merge
+    for (let i = 0; i < batchOutputs.length; i++) {
+      ffmpeg.FS('writeFile', `batch_${i}.ts`, batchOutputs[i]);
+      batchOutputs[i] = null; // free JS ref
+    }
+
+    // Final concat
+    let concatList = '';
+    for (let i = 0; i < batchOutputs.length; i++) {
+      concatList += `file 'batch_${i}.ts'\n`;
+    }
+    ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
+
+    let finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
 
     sendProgress(95, progressUrl, t('merging'), itemId);
     logger.info(`Writing ${_totalBytes} bytes as single file to MEMFS, FFmpeg starting...`);
