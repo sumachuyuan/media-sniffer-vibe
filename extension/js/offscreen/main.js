@@ -263,43 +263,27 @@ async function handleMergeSegments(m) {
 
     let finalArgs;
     if (mapUrl) {
-      // fMP4: manually concatenate Uint8Arrays to avoid Blob NotReadableError
-      const parts = [initBuffer];
-      for (let i = 0; i < total; i++) {
-        if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
-      }
-      let totalBytes = 0;
-      for (const p of parts) totalBytes += p.byteLength;
-      const mergedBuffer = new Uint8Array(totalBytes);
-      let offset = 0;
-      for (const p of parts) {
-        mergedBuffer.set(p, offset);
-        offset += p.byteLength;
-      }
-      ffmpeg.FS('writeFile', 'merged.mp4', mergedBuffer);
-      // Free JS references
+      // fMP4: stream-write to MEMFS to avoid 280MB ArrayBuffer allocation
+      // Ponytail: new Uint8Array(280MB) fails in Chrome WASM context.
+      // Use FS.open('a') append mode to write piece by piece.
+      const fd = ffmpeg.FS('open', 'merged.mp4', 'a');
+      if (initBuffer) ffmpeg.FS('write', fd, initBuffer, 0, initBuffer.byteLength);
       initBuffer = null;
-      for (let i = 0; i < total; i++) segmentBuffers[i] = null;
+      for (let i = 0; i < total; i++) {
+        const seg = segmentBuffers[i];
+        if (seg) { ffmpeg.FS('write', fd, seg, 0, seg.byteLength); segmentBuffers[i] = null; }
+      }
+      ffmpeg.FS('close', fd);
 
       finalArgs = ['-y', '-i', 'merged.mp4', '-map', '0', '-c', 'copy', '-fflags', '+genpts', '-movflags', '+faststart', `${outputName}.mp4`];
     } else {
-      // TS: manually concatenate Uint8Arrays to avoid Blob NotReadableError
-      const parts = [];
+      // TS: stream-write to MEMFS to avoid 280MB ArrayBuffer allocation
+      const fd = ffmpeg.FS('open', 'merged.ts', 'a');
       for (let i = 0; i < total; i++) {
-        if (segmentBuffers[i]) parts.push(segmentBuffers[i]);
+        const seg = segmentBuffers[i];
+        if (seg) { ffmpeg.FS('write', fd, seg, 0, seg.byteLength); segmentBuffers[i] = null; }
       }
-      let totalBytes = 0;
-      for (const p of parts) totalBytes += p.byteLength;
-      const mergedBuffer = new Uint8Array(totalBytes);
-      let offset = 0;
-      for (const p of parts) {
-        mergedBuffer.set(p, offset);
-        offset += p.byteLength;
-      }
-      ffmpeg.FS('writeFile', 'merged.ts', mergedBuffer);
-      // Free JS references
-      
-      for (let i = 0; i < total; i++) segmentBuffers[i] = null;
+      ffmpeg.FS('close', fd);
 
       finalArgs = ['-y', '-fflags', '+genpts+igndts', '-i', 'merged.ts', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-movflags', '+faststart', `${outputName}.mp4`];
     }
