@@ -263,7 +263,7 @@ async function handleMergeSegments(m) {
       let concatList = "";
       for (let i = 0; i < total; i++) concatList += `file 'part_${i}.ts'\n`;
       ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concatList));
-      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
+      finalArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-map', '0', '-map', '-0:d', '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-fflags', '+genpts+igndts', '-movflags', '+faststart', `${outputName}.mp4`];
     }
 
     sendProgress(95, progressUrl, t('merging'), itemId);
@@ -274,6 +274,9 @@ async function handleMergeSegments(m) {
     logger.info(`FFmpeg process completed for ${outputName}`);
     if (isCancelled) throw new Error('CANCELLED');
     const outData = ffmpeg.FS('readFile', `${outputName}.mp4`);
+    // Guard: this ffmpeg.wasm build resolves run() even when muxing fails,
+    // leaving a 0-byte output that would silently "succeed" as an empty download.
+    if (!outData || outData.length < 1024) throw new Error('FFMPEG_EXEC_ERROR: FFmpeg produced empty output, merge failed.');
     const blobUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
     chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: `${outputName}.mp4`, url: progressUrl, itemId }).catch(() => { });
   } catch (e) {
@@ -319,6 +322,8 @@ async function handleProxyDownload(m) {
     }
 
     const blob = new Blob(chunks, { type: resp.headers.get('Content-Type') || 'video/mp4' });
+    // Anti-sniffer sites bait <video src> with a few-KB "empty.mp4"; don't save it as a video.
+    if (blob.size < 10240) throw new Error(`内容过小（${blob.size} 字节），疑似空视频/诱饵文件`);
     const blobUrl = URL.createObjectURL(blob);
     chrome.runtime.sendMessage({ type: 'FFMPEG_COMPLETE', blobUrl, filename: `${outputName}.mp4`, url, itemId, isProxy: true });
   } catch (e) {

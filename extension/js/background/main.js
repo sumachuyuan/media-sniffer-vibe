@@ -458,11 +458,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (type === 'GET_SEGMENTS') {
       logger.info(`GET_SEGMENTS requested for: ${request.url}`);
-      if (request.url.includes('.m3u8')) parseHlsSegments(request.url).then(res => {
+      // The manifest fetch must carry the page identity: without this, referer-gated
+      // CDNs 403 the playlist and the scan silently returns 0 segments. Rules are
+      // extension-scoped and get overwritten by START_FFMPEG_MERGE / cleared on done.
+      const prep = request.referer
+        ? updateDnrRulesForFetch(request.referer, request.ua, request.url, true)
+        : Promise.resolve();
+      if (request.url.includes('.m3u8')) prep.then(() => parseHlsSegments(request.url)).then(res => {
         logger.info(`HLS Parse completed. Found ${res.segments?.length || 0} segments.`);
         sendResponse(res);
       });
-      else if (request.url.includes('.mpd')) parseDashSegments(request.url).then(res => {
+      else if (request.url.includes('.mpd')) prep.then(() => parseDashSegments(request.url)).then(res => {
         logger.info(`DASH Parse completed. Found ${res.segments?.length || 0} segments.`);
         sendResponse(res);
       });

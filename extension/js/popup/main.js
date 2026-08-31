@@ -783,7 +783,7 @@ function bindEvents(tab) {
             state.mergingUrl = btn.dataset.url;
             ui.updateMergeBanner(2, t('scanning'));
             renderUrls();
-            chrome.runtime.sendMessage({ type: 'GET_SEGMENTS', url: state.mergingUrl }, (data) => {
+            chrome.runtime.sendMessage({ type: 'GET_SEGMENTS', url: state.mergingUrl, referer: tab.url, ua: state.ua }, (data) => {
                 if (data?.segments?.length > 0) {
                     chrome.runtime.sendMessage({ type: 'START_FFMPEG_MERGE', segments: data.segments, outputName: btn.dataset.filename, referer: tab.url, ua: state.ua, itemId: btn.dataset.id, manifestUrl: state.mergingUrl, encryption: data.encryption, mapUrl: data.mapUrl, concurrency: state.concurrency });
                 } else { ui.showToast(t('toastScanFailed'), 'error'); resetUI(); renderUrls(); }
@@ -817,7 +817,7 @@ function bindEvents(tab) {
             if (state.mergingUrl || _isRecordingActive) { _showConflictWarning(); return; }
             const masterUrl = tag.dataset.url, qUrl = tag.dataset.qualityUrl, fname = tag.dataset.filename, res = tag.dataset.res;
             ui.showToast(t('targeting', [res]), 'ffmpeg');
-            chrome.runtime.sendMessage({ type: 'GET_SEGMENTS', url: qUrl }, (data) => {
+            chrome.runtime.sendMessage({ type: 'GET_SEGMENTS', url: qUrl, referer: tab.url, ua: state.ua }, (data) => {
                 if (data?.segments?.length > 0) {
                     state.mergingUrl = masterUrl;
                     ui.updateMergeBanner(5, t('initializing'));

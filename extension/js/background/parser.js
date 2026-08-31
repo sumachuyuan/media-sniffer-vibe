@@ -13,6 +13,12 @@ export async function parseMPD(url) {
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
+    // fetch() does not reject on HTTP errors — without this guard a 403/404 body
+    // (e.g. "403 Forbidden") gets parsed as a valid-but-empty manifest.
+    if (!response.ok) {
+      logger.warn(`parseMPD fetch failed: HTTP ${response.status}`);
+      return null;
+    }
     const text = await response.text();
 
     if (!text.includes('<MPD') || !text.includes('<Representation')) {
@@ -67,6 +73,10 @@ export async function parseM3U8(url) {
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
+    if (!response.ok) {
+      logger.warn(`parseM3U8 fetch failed: HTTP ${response.status}`);
+      return null;
+    }
     const text = await response.text();
 
     let encryption = null;
@@ -140,6 +150,10 @@ export async function parseM3U8(url) {
 export async function parseHlsSegments(playlistUrl) {
   try {
     const response = await fetch(playlistUrl);
+    if (!response.ok) {
+      logger.warn(`parseHlsSegments fetch failed: HTTP ${response.status}`);
+      return { segments: [], encryption: null, mapUrl: null };
+    }
     const text = await response.text();
     if (text.includes('#EXT-X-STREAM-INF:') && !text.includes('#EXTINF:')) {
       const masterData = await parseM3U8(playlistUrl);
