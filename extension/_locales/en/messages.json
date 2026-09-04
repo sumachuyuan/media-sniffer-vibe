@@ -69,6 +69,9 @@
   "copyCmd": {
     "message": "CMD"
   },
+  "copyCmdMp3": {
+    "message": "CMD · MP3"
+  },
   "nativeMerge": {
     "message": "MERGE"
   },
@@ -96,6 +99,9 @@
   "toastCommandCopied": {
     "message": "Command Copied!"
   },
+  "toastCommandCopiedMp3": {
+    "message": "MP3 Command Copied!"
+  },
   "toastUrlCopied": {
     "message": "URL Copied!"
   },
@@ -116,6 +122,9 @@
   },
   "copyCmdTooltip": {
     "message": "Copy CLI command for yt-dlp/ffmpeg"
+  },
+  "copyCmdMp3Tooltip": {
+    "message": "MP3 output (requires local ffmpeg). A same-named MP4 is used as source and deleted; rename it first to keep it"
   },
   "copyUrlTooltip": {
     "message": "Copy media URL to clipboard"

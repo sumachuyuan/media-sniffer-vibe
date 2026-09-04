@@ -2,7 +2,7 @@
  * Sovereign Popup Renderer - Logic for building the URL list
  */
 import { ui } from './ui.js';
-import { sanitizeFilename, escapeHtml } from './utils.js';
+import { sanitizeFilename, escapeHtml, buildYtDlpCommand } from './utils.js';
 import { i18n } from './i18n.js';
 
 const t = (key, subs) => i18n.t(key, subs);
@@ -129,14 +129,17 @@ export function renderPromo(platformName, currentTab, ua) {
         </div>
         <div class="promo-desc">${t('promoDesc')}</div>
         <button id="copyMajorBtn" class="gold-btn" title="${t('copyCmdTooltip')}">${t('copyCmd')}</button>
-        <button id="rotationModeBtn" class="outline-btn" title="翻转页面视频（再次点击关闭）">翻转视频</button>
+        <div class="promo-row">
+            <button id="copyMp3Btn" class="outline-btn" title="${t('copyCmdMp3Tooltip')}">${t('copyCmdMp3')}</button>
+            <button id="rotationModeBtn" class="outline-btn" title="翻转页面视频（再次点击关闭）">翻转视频</button>
+        </div>
     `;
-    div.querySelector('#copyMajorBtn').onclick = () => {
-        const isYT = currentTab.url.includes('youtube.com') || currentTab.url.includes('googlevideo.com');
-        const remoteFlag = isYT ? ' --remote-components ejs:github' : '';
-        const cmd = `yt-dlp${remoteFlag} --cookies-from-browser chrome --referer "${currentTab.url}" --user-agent "${ua}" --impersonate chrome --concurrent-fragments 5 --no-mtime --merge-output-format mp4 -o "${sanitizeFilename(currentTab.title)}.%(ext)s" "${currentTab.url}"`;
-        navigator.clipboard.writeText(cmd).then(() => ui.showToast(t('toastCommandCopied')));
+    const copyCommand = (mode, toastKey) => {
+        const cmd = buildYtDlpCommand({ url: currentTab.url, title: currentTab.title, ua, mode });
+        navigator.clipboard.writeText(cmd).then(() => ui.showToast(t(toastKey)));
     };
+    div.querySelector('#copyMajorBtn').onclick = () => copyCommand('mp4', 'toastCommandCopied');
+    div.querySelector('#copyMp3Btn').onclick = () => copyCommand('mp3', 'toastCommandCopiedMp3');
     return div;
 }
 

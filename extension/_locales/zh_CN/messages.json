@@ -69,6 +69,9 @@
   "copyCmd": {
     "message": "CMD"
   },
+  "copyCmdMp3": {
+    "message": "CMD · MP3"
+  },
   "nativeMerge": {
     "message": "合并下载"
   },
@@ -96,6 +99,9 @@
   "toastCommandCopied": {
     "message": "命令已复制！"
   },
+  "toastCommandCopiedMp3": {
+    "message": "MP3 命令已复制！"
+  },
   "toastUrlCopied": {
     "message": "URL 已复制！"
   },
@@ -116,6 +122,9 @@
   },
   "copyCmdTooltip": {
     "message": "复制 yt-dlp/ffmpeg 终端命令"
+  },
+  "copyCmdMp3Tooltip": {
+    "message": "输出 MP3（需本机 ffmpeg）。同名 MP4 会被当作素材转码后删除，想保留请先改名"
   },
   "copyUrlTooltip": {
     "message": "复制媒体直链"
