@@ -3,7 +3,7 @@
  */
 import { ui } from './ui.js';
 import { logger } from '../common/logger.js';
-import { sanitizeFilename, copyToClipboard } from './utils.js';
+import { sanitizeFilename, copyToClipboard, YTDLP_MP3_FLAGS } from './utils.js';
 import { createUrlItem, renderPromo, renderCompanion } from './renderer.js';
 import { i18n } from './i18n.js';
 import { saveFileHandle, loadFileHandle, loadRemuxOutput } from '../record/storage.js';
@@ -796,6 +796,14 @@ function bindEvents(tab) {
             const isYT = url.includes('googlevideo.com') || url.includes('youtube.com');
             const remoteFlag = isYT ? ' --remote-components ejs:github' : '';
             copyToClipboard(`yt-dlp${remoteFlag} --referer "${tab.url}" --user-agent "${state.ua}" -o "${btn.dataset.filename}.%(ext)s" "${url}"`, () => ui.showToast(t('toastCommandCopied')));
+        };
+    });
+    document.querySelectorAll('.copy-cli-mp3').forEach(btn => {
+        btn.onclick = () => {
+            const url = btn.dataset.url;
+            const isYT = url.includes('googlevideo.com') || url.includes('youtube.com');
+            const remoteFlag = isYT ? ' --remote-components ejs:github' : '';
+            copyToClipboard(`yt-dlp${remoteFlag} --referer "${tab.url}" --user-agent "${state.ua}" ${YTDLP_MP3_FLAGS} -o "${btn.dataset.filename}.%(ext)s" "${url}"`, () => ui.showToast(t('toastCommandCopiedMp3')));
         };
     });
     document.querySelectorAll('.copy-btn').forEach(btn => btn.onclick = () => copyToClipboard(btn.dataset.url, () => ui.showToast(t('toastUrlCopied'))));

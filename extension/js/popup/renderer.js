@@ -67,6 +67,8 @@ export function createUrlItem(item, tab, state, searchTerm = '') {
         : state.mergingUrl ? `<div class="task-lock">${t('taskLock')}</div>`
             : `
             <button class="copy-cli" data-url="${item.url}" data-filename="${filename}" title="${t('copyCmdTooltip')}">${t('copyCmd')}</button>
+            ${item.mediaType !== 'audio' ? `
+            <button class="copy-cli-mp3" data-url="${item.url}" data-filename="${filename}" title="${t('copyCmdMp3Tooltip')}">${t('copyCmdMp3')}</button>` : ''}
             ${item.isSegmented ? `
                 <button class="native-merge" 
                     data-url="${item.url}" 

@@ -464,14 +464,18 @@
     .actions {
       margin-top: 16px;
       display: flex;
-      gap: 10px;
+      gap: 5px;
       flex-wrap: wrap;
     }
 
+    /* Tight fit so 5 buttons (CMD / CMD·MP3 / merge / play / URL) stay on one 440px line */
     .actions button {
-      flex: 1;
-      min-width: 80px;
+      flex: 1 1 52px;
+      min-width: 0;
       white-space: nowrap;
+      font-size: 10px;
+      letter-spacing: 0;
+      padding: 10px 2px;
     }
 
     .companion-actions {
